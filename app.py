@@ -5,6 +5,7 @@ Converts podcast scripts to audio using OpenAI TTS API
 
 import os
 import re
+import json
 import uuid
 import tempfile
 import shutil
@@ -165,7 +166,7 @@ def generate():
                 text = request.form.get('text', '')
 
             if not text.strip():
-                yield f"data: {{'error': 'No text provided'}}\n\n"
+                yield f"data: {json.dumps({'error': 'No text provided'})}\n\n"
                 return
 
             voice = request.form.get('voice', 'nova')
@@ -209,7 +210,7 @@ def generate():
                         return
 
                 except Exception as e:
-                    yield f"data: {{\"status\": \"error\", \"message\": \"API error: {str(e)}\"}}\n\n"
+                    yield f"data: {json.dumps({'status': 'error', 'message': f'API error: {str(e)}'})}\n\n"
                     return
 
             # Concatenate chunks
@@ -225,9 +226,13 @@ def generate():
                 yield f"data: {{\"status\": \"error\", \"message\": \"Failed to create final audio file\"}}\n\n"
 
         except Exception as e:
-            yield f"data: {{\"status\": \"error\", \"message\": \"Error: {str(e)}\"}}\n\n"
+            yield f"data: {json.dumps({'status': 'error', 'message': f'Error: {str(e)}'})}\n\n"
 
-    return Response(generate_stream(), mimetype='text/event-stream')
+    response = Response(generate_stream(), mimetype='text/event-stream')
+    response.headers['Cache-Control'] = 'no-cache'
+    response.headers['Connection'] = 'keep-alive'
+    response.headers['X-Accel-Buffering'] = 'no'  # Critical for Render's nginx proxy
+    return response
 
 
 @app.route('/download/<job_id>')
