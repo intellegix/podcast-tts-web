@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Podcast TTS Generator</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Podcast TTS Generator</h1>
+            <p class="subtitle">Convert your podcast scripts to audio using OpenAI TTS</p>
+        </header>
+
+        <main>
+            <form id="tts-form">
+                <div class="form-section">
+                    <label for="text">Paste your script:</label>
+                    <textarea
+                        id="text"
+                        name="text"
+                        placeholder="Paste your podcast script here... Supports plain text and markdown."
+                        rows="12"
+                    ></textarea>
+                </div>
+
+                <div class="divider">
+                    <span>OR</span>
+                </div>
+
+                <div class="form-section">
+                    <label for="file">Upload a text file:</label>
+                    <div class="file-upload">
+                        <input type="file" id="file" name="file" accept=".txt,.md,.text">
+                        <span class="file-label" id="file-label">Choose file (.txt, .md)</span>
+                    </div>
+                </div>
+
+                <div class="options-row">
+                    <div class="form-section">
+                        <label for="voice">Voice:</label>
+                        <select id="voice" name="voice">
+                            {% for voice in voices %}
+                            <option value="{{ voice }}" {% if voice == 'nova' %}selected{% endif %}>
+                                {{ voice.capitalize() }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <small class="voice-hint">
+                            <strong>Nova:</strong> Warm, natural |
+                            <strong>Alloy:</strong> Neutral |
+                            <strong>Echo:</strong> Deeper |
+                            <strong>Fable:</strong> British |
+                            <strong>Onyx:</strong> Deep male |
+                            <strong>Shimmer:</strong> Expressive
+                        </small>
+                    </div>
+
+                    <div class="form-section">
+                        <label for="model">Quality:</label>
+                        <select id="model" name="model">
+                            {% for model in models %}
+                            <option value="{{ model }}" {% if model == 'tts-1-hd' %}selected{% endif %}>
+                                {{ 'HD (Higher quality)' if model == 'tts-1-hd' else 'Standard (Faster)' }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+
+                <button type="submit" id="generate-btn">
+                    <span class="btn-text">Generate Audio</span>
+                    <span class="btn-icon">&#9658;</span>
+                </button>
+            </form>
+
+            <div id="progress-section" class="hidden">
+                <div class="progress-header">
+                    <span id="progress-message">Starting...</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="progress-stats">
+                    <span id="progress-chunks">Chunk 0 of 0</span>
+                </div>
+            </div>
+
+            <div id="result-section" class="hidden">
+                <div class="success-icon">&#10003;</div>
+                <h2>Audio Generated!</h2>
+                <p id="result-size">Size: 0 MB</p>
+                <a id="download-link" class="download-btn" href="#">
+                    Download MP3
+                </a>
+            </div>
+
+            <div id="error-section" class="hidden">
+                <div class="error-icon">&#10007;</div>
+                <h2>Error</h2>
+                <p id="error-message">Something went wrong.</p>
+                <button onclick="resetForm()" class="retry-btn">Try Again</button>
+            </div>
+        </main>
+
+        <footer>
+            <p>Powered by OpenAI TTS API</p>
+        </footer>
+    </div>
+
+    <script>
+        const form = document.getElementById('tts-form');
+        const fileInput = document.getElementById('file');
+        const fileLabel = document.getElementById('file-label');
+        const generateBtn = document.getElementById('generate-btn');
+        const progressSection = document.getElementById('progress-section');
+        const resultSection = document.getElementById('result-section');
+        const errorSection = document.getElementById('error-section');
+        const progressMessage = document.getElementById('progress-message');
+        const progressFill = document.getElementById('progress-fill');
+        const progressChunks = document.getElementById('progress-chunks');
+        const downloadLink = document.getElementById('download-link');
+        const resultSize = document.getElementById('result-size');
+        const errorMessage = document.getElementById('error-message');
+
+        // File input label update
+        fileInput.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                fileLabel.textContent = this.files[0].name;
+                fileLabel.classList.add('has-file');
+            } else {
+                fileLabel.textContent = 'Choose file (.txt, .md)';
+                fileLabel.classList.remove('has-file');
+            }
+        });
+
+        // Form submission
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const text = document.getElementById('text').value;
+            const file = fileInput.files[0];
+
+            if (!text.trim() && !file) {
+                alert('Please paste a script or upload a file.');
+                return;
+            }
+
+            // Show progress
+            form.classList.add('hidden');
+            progressSection.classList.remove('hidden');
+            resultSection.classList.add('hidden');
+            errorSection.classList.add('hidden');
+
+            const formData = new FormData(form);
+
+            try {
+                const response = await fetch('/generate', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    const text = decoder.decode(value);
+                    const lines = text.split('\n');
+
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const data = JSON.parse(line.substring(6));
+                                handleProgress(data);
+                            } catch (e) {
+                                console.error('Parse error:', e);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            }
+        });
+
+        function handleProgress(data) {
+            if (data.status === 'processing') {
+                progressMessage.textContent = data.message;
+                if (data.total) {
+                    const percent = (data.current / data.total) * 100;
+                    progressFill.style.width = percent + '%';
+                    progressChunks.textContent = `Chunk ${data.current} of ${data.total}`;
+                }
+            } else if (data.status === 'complete') {
+                progressSection.classList.add('hidden');
+                resultSection.classList.remove('hidden');
+                resultSize.textContent = `Size: ${data.size_mb} MB`;
+                downloadLink.href = `/download/${data.download_id}`;
+                downloadLink.onclick = function() {
+                    // Cleanup after download starts
+                    setTimeout(() => {
+                        fetch(`/cleanup/${data.download_id}`, { method: 'POST' });
+                    }, 5000);
+                };
+            } else if (data.status === 'error') {
+                showError(data.message);
+            }
+        }
+
+        function showError(message) {
+            progressSection.classList.add('hidden');
+            resultSection.classList.add('hidden');
+            errorSection.classList.remove('hidden');
+            errorMessage.textContent = message;
+        }
+
+        function resetForm() {
+            form.classList.remove('hidden');
+            progressSection.classList.add('hidden');
+            resultSection.classList.add('hidden');
+            errorSection.classList.add('hidden');
+            progressFill.style.width = '0%';
+            generateBtn.disabled = false;
+        }
+    </script>
+</body>
+</html>
