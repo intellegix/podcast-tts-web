@@ -9,19 +9,35 @@ import uuid
 import tempfile
 import shutil
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_file, Response
+from functools import wraps
+from flask import Flask, render_template, request, jsonify, send_file, Response, session, redirect, url_for
+
 from openai import OpenAI
 
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 
 # Configuration
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+APP_PASSWORD = os.environ.get('PASSWORD', '')
 TEMP_DIR = Path(tempfile.gettempdir()) / 'podcast-tts'
 TEMP_DIR.mkdir(exist_ok=True)
 
 # OpenAI TTS options
 VOICES = ['nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer']
 MODELS = ['tts-1-hd', 'tts-1']
+
+
+def login_required(f):
+    """Decorator to require login for routes"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not APP_PASSWORD:
+            return f(*args, **kwargs)
+        if not session.get('authenticated'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
 
 
 def get_client():
@@ -100,13 +116,38 @@ def concatenate_mp3_files(file_paths, output_path):
     return output_path
 
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Login page"""
+    if not APP_PASSWORD:
+        return redirect(url_for('index'))
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        if password == APP_PASSWORD:
+            session['authenticated'] = True
+            return redirect(url_for('index'))
+        return render_template('login.html', error='Invalid password')
+
+    return render_template('login.html')
+
+
+@app.route('/logout')
+def logout():
+    """Logout"""
+    session.pop('authenticated', None)
+    return redirect(url_for('login'))
+
+
 @app.route('/')
+@login_required
 def index():
     """Main page"""
     return render_template('index.html', voices=VOICES, models=MODELS)
 
 
 @app.route('/generate', methods=['POST'])
+@login_required
 def generate():
     """Generate audio from text - streams progress via SSE"""
 
@@ -190,6 +231,7 @@ def generate():
 
 
 @app.route('/download/<job_id>')
+@login_required
 def download(job_id):
     """Download generated audio file"""
     # Sanitize job_id to prevent path traversal
