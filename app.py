@@ -152,25 +152,25 @@ def index():
 def generate():
     """Generate audio from text - streams progress via SSE"""
 
-    def generate_stream():
+    # Extract request data BEFORE creating generator (to avoid request context issues)
+    if 'file' in request.files and request.files['file'].filename:
+        file = request.files['file']
+        text = file.read().decode('utf-8')
+    else:
+        text = request.form.get('text', '')
+
+    voice = request.form.get('voice', 'nova')
+    model = request.form.get('model', 'tts-1-hd')
+
+    def generate_stream(text, voice, model):
         job_id = str(uuid.uuid4())[:8]
         job_dir = TEMP_DIR / job_id
         job_dir.mkdir(exist_ok=True)
 
         try:
-            # Get text from form or file upload
-            if 'file' in request.files and request.files['file'].filename:
-                file = request.files['file']
-                text = file.read().decode('utf-8')
-            else:
-                text = request.form.get('text', '')
-
             if not text.strip():
                 yield f"data: {json.dumps({'error': 'No text provided'})}\n\n"
                 return
-
-            voice = request.form.get('voice', 'nova')
-            model = request.form.get('model', 'tts-1-hd')
 
             if voice not in VOICES:
                 voice = 'nova'
@@ -228,7 +228,7 @@ def generate():
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'message': f'Error: {str(e)}'})}\n\n"
 
-    response = Response(generate_stream(), mimetype='text/event-stream')
+    response = Response(generate_stream(text, voice, model), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['Connection'] = 'keep-alive'
     response.headers['X-Accel-Buffering'] = 'no'  # Critical for Render's nginx proxy
