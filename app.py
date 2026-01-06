@@ -14,6 +14,8 @@ from functools import wraps
 from flask import Flask, render_template, request, jsonify, send_file, Response, session, redirect, url_for
 
 from openai import OpenAI
+import httpx
+import sys
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24).hex())
@@ -42,10 +44,14 @@ def login_required(f):
 
 
 def get_client():
-    """Get OpenAI client"""
+    """Get OpenAI client with timeout"""
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY environment variable not set")
-    return OpenAI(api_key=OPENAI_API_KEY)
+    # Set 120 second timeout for TTS API calls
+    return OpenAI(
+        api_key=OPENAI_API_KEY,
+        timeout=httpx.Timeout(120.0, connect=10.0)
+    )
 
 
 def preprocess_text(text):
@@ -75,8 +81,8 @@ def preprocess_text(text):
     return text.strip()
 
 
-def split_into_chunks(text, max_chars=4000):
-    """Split text into chunks for OpenAI API (max 4096 chars per request)"""
+def split_into_chunks(text, max_chars=2000):
+    """Split text into chunks for OpenAI API (smaller chunks = faster processing)"""
     paragraphs = text.split('\n\n')
     chunks = []
     current = ""
@@ -183,6 +189,7 @@ def generate():
             total_chunks = len(chunks)
 
             yield f"data: {{\"status\": \"processing\", \"message\": \"Starting generation...\", \"total\": {total_chunks}}}\n\n"
+            print(f"[TTS] Starting generation: {total_chunks} chunks, model={model}, voice={voice}", file=sys.stderr, flush=True)
 
             # Get OpenAI client
             client = get_client()
@@ -193,6 +200,7 @@ def generate():
                 chunk_path = job_dir / f"chunk-{i:03d}.mp3"
 
                 yield f"data: {{\"status\": \"processing\", \"message\": \"Generating chunk {i+1} of {total_chunks}...\", \"current\": {i+1}, \"total\": {total_chunks}}}\n\n"
+                print(f"[TTS] Generating chunk {i+1}/{total_chunks} ({len(chunk)} chars)...", file=sys.stderr, flush=True)
 
                 try:
                     response = client.audio.speech.create(
@@ -205,11 +213,14 @@ def generate():
 
                     if chunk_path.exists() and chunk_path.stat().st_size > 0:
                         chunk_files.append(chunk_path)
+                        print(f"[TTS] Chunk {i+1} done ({chunk_path.stat().st_size} bytes)", file=sys.stderr, flush=True)
                     else:
+                        print(f"[TTS] ERROR: Chunk {i+1} failed - empty file", file=sys.stderr, flush=True)
                         yield f"data: {{\"status\": \"error\", \"message\": \"Failed to generate chunk {i+1}\"}}\n\n"
                         return
 
                 except Exception as e:
+                    print(f"[TTS] ERROR: Chunk {i+1} exception: {str(e)}", file=sys.stderr, flush=True)
                     yield f"data: {json.dumps({'status': 'error', 'message': f'API error: {str(e)}'})}\n\n"
                     return
 
