@@ -428,3 +428,13 @@ footer {
     line-height: 1.5;
     margin-left: 2rem;
 }
+
+/* Auto-expand section styling */
+.auto-expand-section {
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.3);
+}
+
+.auto-expand-section .checkbox-label input[type="checkbox"] {
+    accent-color: #22c55e;
+}

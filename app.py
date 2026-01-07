@@ -73,6 +73,24 @@ FEMALE_NAMES = {
 # Set to 0 for unlimited (1 agent per chunk), or a number to limit concurrent workers
 MAX_CONCURRENT_CHUNKS = int(os.environ.get('TTS_MAX_CONCURRENT', '0'))  # 0 = unlimited (1 per chunk)
 
+# Script expansion prompt for GPT-4o
+SCRIPT_EXPANSION_PROMPT = """You are a podcast script writer. Expand the given outline into natural dialogue between the hosts.
+
+FORMAT RULES:
+- Use speaker names followed by colon (ALEX:, SARAH:, etc.) - match the names used in the context
+- Write natural, conversational dialogue with back-and-forth between hosts
+- The first speaker is typically the host/interviewer, the second is the expert/guest
+- Match the tone, style, and technical depth of the provided context
+- Do NOT include stage directions in parentheses like (laughs) or (pauses)
+- Aim for 800-1200 words per episode section
+- Include specific examples, numbers, and details from the outline
+- Make it educational but engaging - explain concepts clearly
+
+OUTPUT: Return ONLY the expanded dialogue script, no explanations or meta-commentary."""
+
+# Script expansion model
+SCRIPT_EXPANSION_MODEL = os.environ.get('SCRIPT_EXPANSION_MODEL', 'gpt-4o')
+
 
 class RateLimiter:
     """Adaptive rate limiter to prevent OpenAI 429 errors"""
@@ -297,6 +315,186 @@ def split_by_speaker(text, speaker_voices, max_chars=2000):
     return final_chunks
 
 
+# ============== Script Auto-Expansion Functions ==============
+
+def is_episode_incomplete(episode_text):
+    """
+    Detect if an episode section is incomplete (outline/notes vs full dialogue).
+    Returns True if the episode needs AI expansion.
+    """
+    # Check for dialogue markers (SPEAKER: format)
+    has_dialogue = bool(re.search(r'^[A-Z][A-Za-z]+:', episode_text, re.MULTILINE))
+
+    # Check for outline/instruction markers
+    has_bullets = bool(re.search(r'^\s*[-*•]\s+', episode_text, re.MULTILINE))
+    has_numbered_list = bool(re.search(r'^\s*\d+[.)]\s+', episode_text, re.MULTILINE))
+    has_instructions = bool(re.search(
+        r'\b(Cover|Explain|Describe|Include|Show|Discuss|Talk about|Mention|Address)\b',
+        episode_text,
+        re.IGNORECASE
+    ))
+
+    # Check for parenthetical instructions like "(describe the workflow)"
+    has_paren_instructions = bool(re.search(r'\([^)]*\b(describe|explain|cover|discuss)\b[^)]*\)', episode_text, re.IGNORECASE))
+
+    # Word count check (excluding header)
+    lines = episode_text.strip().split('\n')
+    content_lines = [l for l in lines[1:] if l.strip()]  # Skip header
+    word_count = sum(len(line.split()) for line in content_lines)
+
+    # Episode is incomplete if:
+    # 1. No dialogue AND has outline markers, OR
+    # 2. Has parenthetical instructions, OR
+    # 3. Very short content with instruction words
+    if not has_dialogue and (has_bullets or has_numbered_list or has_paren_instructions):
+        return True
+    if has_paren_instructions:
+        return True
+    if word_count < 200 and has_instructions:
+        return True
+
+    return False
+
+
+def parse_episodes(text):
+    """
+    Split script into episodes and detect which ones are incomplete.
+    Returns list of dicts with 'text', 'header', 'is_complete', 'episode_num'.
+    """
+    # Pattern to match episode headers like "## EPISODE 1:" or "EPISODE 1:"
+    episode_pattern = r'((?:##?\s*)?EPISODE\s*(\d+)[:\s].+?)(?=(?:##?\s*)?EPISODE\s*\d+[:\s]|\Z)'
+
+    matches = list(re.finditer(episode_pattern, text, re.DOTALL | re.IGNORECASE))
+
+    if not matches:
+        # No episode structure found - treat as single complete script
+        return [{'text': text, 'header': '', 'is_complete': True, 'episode_num': 0}]
+
+    episodes = []
+    for match in matches:
+        episode_text = match.group(1).strip()
+        episode_num = int(match.group(2))
+
+        # Extract header (first line)
+        header_match = re.match(r'^[^\n]+', episode_text)
+        header = header_match.group(0) if header_match else f"Episode {episode_num}"
+
+        episodes.append({
+            'text': episode_text,
+            'header': header,
+            'is_complete': not is_episode_incomplete(episode_text),
+            'episode_num': episode_num
+        })
+
+    return episodes
+
+
+def expand_script_with_ai(outline_text, context="", speakers=None):
+    """
+    Use GPT-4o to expand an episode outline into full podcast dialogue.
+
+    Args:
+        outline_text: The incomplete episode outline
+        context: Text from previous complete episodes for style matching
+        speakers: List of speaker names to use (e.g., ['ALEX', 'SARAH'])
+
+    Returns:
+        Expanded dialogue script
+    """
+    client = get_client()
+
+    # Build the user prompt
+    speaker_info = ""
+    if speakers:
+        speaker_info = f"\nSpeakers to use: {', '.join(speakers)}"
+
+    context_snippet = ""
+    if context:
+        # Limit context to last ~2000 chars to avoid token limits
+        context_snippet = f"\n\nStyle reference from previous episodes:\n{context[-2000:]}"
+
+    user_prompt = f"""Expand this episode outline into a full podcast dialogue script:{speaker_info}{context_snippet}
+
+EPISODE TO EXPAND:
+{outline_text}
+
+Write the complete dialogue now:"""
+
+    try:
+        response = client.chat.completions.create(
+            model=SCRIPT_EXPANSION_MODEL,
+            messages=[
+                {"role": "system", "content": SCRIPT_EXPANSION_PROMPT},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            max_tokens=4000
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"[EXPAND] Error expanding script: {e}", file=sys.stderr, flush=True)
+        raise
+
+
+def auto_expand_script(text, progress_callback=None):
+    """
+    Automatically detect and expand incomplete episodes in a script.
+
+    Args:
+        text: Full script text
+        progress_callback: Optional function to call with progress updates
+
+    Returns:
+        Tuple of (expanded_text, expansion_count)
+    """
+    episodes = parse_episodes(text)
+
+    if not episodes or all(ep['is_complete'] for ep in episodes):
+        return text, 0
+
+    # Find incomplete episodes
+    incomplete = [ep for ep in episodes if not ep['is_complete']]
+    complete = [ep for ep in episodes if ep['is_complete']]
+
+    if not incomplete:
+        return text, 0
+
+    # Extract speakers from complete episodes for consistency
+    speakers = detect_speakers('\n'.join(ep['text'] for ep in complete))
+    if not speakers:
+        speakers = ['ALEX', 'SARAH']  # Default speakers
+
+    # Build context from complete episodes
+    context = '\n\n'.join(ep['text'] for ep in complete[:3])  # Use first 3 complete episodes
+
+    # Expand each incomplete episode
+    expanded_episodes = {}
+    for i, ep in enumerate(incomplete):
+        if progress_callback:
+            progress_callback(f"Expanding Episode {ep['episode_num']} with AI... ({i+1}/{len(incomplete)})")
+
+        print(f"[EXPAND] Expanding Episode {ep['episode_num']}...", file=sys.stderr, flush=True)
+
+        try:
+            expanded_text = expand_script_with_ai(ep['text'], context, speakers)
+            expanded_episodes[ep['episode_num']] = expanded_text
+            print(f"[EXPAND] Episode {ep['episode_num']} expanded ({len(expanded_text)} chars)", file=sys.stderr, flush=True)
+        except Exception as e:
+            print(f"[EXPAND] Failed to expand Episode {ep['episode_num']}: {e}", file=sys.stderr, flush=True)
+            # Keep original text on failure
+            expanded_episodes[ep['episode_num']] = ep['text']
+
+    # Rebuild the full script with expanded episodes
+    result_parts = []
+    for ep in episodes:
+        if ep['episode_num'] in expanded_episodes:
+            result_parts.append(expanded_episodes[ep['episode_num']])
+        else:
+            result_parts.append(ep['text'])
+
+    return '\n\n'.join(result_parts), len(incomplete)
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Login page"""
@@ -342,8 +540,9 @@ def generate():
     voice = request.form.get('voice', 'nova')
     model = request.form.get('model', 'tts-1-hd')
     multi_voice = request.form.get('multi_voice', 'false').lower() == 'true'
+    auto_expand = request.form.get('auto_expand', 'true').lower() == 'true'  # Default ON
 
-    def generate_stream(text, voice, model, multi_voice):
+    def generate_stream(text, voice, model, multi_voice, auto_expand):
         job_id = str(uuid.uuid4())[:8]
         job_dir = TEMP_DIR / job_id
         job_dir.mkdir(exist_ok=True)
@@ -357,6 +556,27 @@ def generate():
                 voice = 'nova'
             if model not in MODELS:
                 model = 'tts-1-hd'
+
+            # Auto-expand incomplete episodes if enabled
+            if auto_expand:
+                yield f"data: {{\"status\": \"processing\", \"message\": \"Analyzing script for incomplete sections...\"}}\n\n"
+
+                # Check for incomplete episodes
+                episodes = parse_episodes(text)
+                incomplete_count = sum(1 for ep in episodes if not ep['is_complete'])
+
+                if incomplete_count > 0:
+                    yield f"data: {{\"status\": \"processing\", \"message\": \"Found {incomplete_count} incomplete episode(s). Expanding with AI...\"}}\n\n"
+                    print(f"[EXPAND] Found {incomplete_count} incomplete episodes, expanding...", file=sys.stderr, flush=True)
+
+                    try:
+                        # Expand incomplete episodes
+                        text, expanded_count = auto_expand_script(text)
+                        yield f"data: {{\"status\": \"processing\", \"message\": \"Expanded {expanded_count} episode(s). Continuing to audio generation...\"}}\n\n"
+                        print(f"[EXPAND] Expansion complete, {expanded_count} episodes expanded", file=sys.stderr, flush=True)
+                    except Exception as e:
+                        yield f"data: {{\"status\": \"processing\", \"message\": \"Script expansion failed: {str(e)}. Continuing with original text...\"}}\n\n"
+                        print(f"[EXPAND] Expansion failed: {e}", file=sys.stderr, flush=True)
 
             # Preprocess text
             processed = preprocess_text(text)
@@ -461,7 +681,7 @@ def generate():
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'message': f'Error: {str(e)}'})}\n\n"
 
-    response = Response(generate_stream(text, voice, model, multi_voice), mimetype='text/event-stream')
+    response = Response(generate_stream(text, voice, model, multi_voice, auto_expand), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['Connection'] = 'keep-alive'
     response.headers['X-Accel-Buffering'] = 'no'  # Critical for Render's nginx proxy

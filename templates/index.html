@@ -80,6 +80,17 @@
                     </small>
                 </div>
 
+                <div class="form-section checkbox-section auto-expand-section">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="auto_expand" name="auto_expand" value="true" checked>
+                        <span class="checkbox-text">Auto-expand incomplete scripts</span>
+                    </label>
+                    <small class="multi-voice-hint">
+                        Automatically detect and expand incomplete episodes using GPT-4o.
+                        <br>Detects outlines, bullet points, and instructions like "(describe...)" and converts them to full dialogue.
+                    </small>
+                </div>
+
                 <button type="submit" id="generate-btn">
                     <span class="btn-text">Generate Audio</span>
                     <span class="btn-icon">&#9658;</span>
