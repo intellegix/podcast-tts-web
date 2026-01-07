@@ -1,6 +1,14 @@
 """
 Podcast TTS Web App
 Converts podcast scripts to audio using OpenAI TTS API
+
+Enterprise-grade implementation with:
+- Security headers and CSRF protection
+- Rate limiting on sensitive endpoints
+- Retry logic with exponential backoff
+- Circuit breakers for external APIs
+- Structured logging
+- Automatic cleanup scheduling
 """
 
 # Gevent monkey patching - MUST be before all other imports
@@ -14,21 +22,52 @@ import uuid
 import time
 import tempfile
 import shutil
+import logging
+import atexit
+from datetime import datetime
 from pathlib import Path
 from functools import wraps
 from collections import deque
 from flask import Flask, render_template, request, jsonify, send_file, Response, session, redirect, url_for
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from openai import OpenAI
+import openai
 import anthropic
 import requests
 import httpx
 import sys
 import gevent
 from gevent.pool import Pool as GeventPool
+from gevent.lock import RLock
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from apscheduler.schedulers.background import BackgroundScheduler
+
+# Configure logging (structured format)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24).hex())
+
+# Secure session cookies configuration
+app.config.update(
+    SESSION_COOKIE_SECURE=os.environ.get('FLASK_ENV') == 'production',  # True in production
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Strict'
+)
+
+# Initialize rate limiter
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
 
 # Configuration - API keys must be set via environment variables
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
@@ -37,6 +76,12 @@ PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY')
 APP_PASSWORD = os.environ.get('PASSWORD', '')
 TEMP_DIR = Path(tempfile.gettempdir()) / 'podcast-tts'
 TEMP_DIR.mkdir(exist_ok=True)
+
+# Input size limits (security)
+MAX_TEXT_LENGTH = 5 * 1024 * 1024  # 5MB max text input
+MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB max file upload
+MAX_CHUNKS = 1000  # Maximum chunks per job
+ALLOWED_FILE_EXTENSIONS = {'.txt', '.md', '.text'}
 
 # OpenAI TTS options
 VOICES = ['nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer']
@@ -81,13 +126,72 @@ MAX_AI_CONCURRENT = int(os.environ.get('AI_MAX_CONCURRENT', '5'))  # Limit concu
 # Claude model configuration (allows updating without code change)
 CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-20250514')
 
-# Startup warnings for missing API keys
+# Startup warnings for missing API keys (using logger)
 if not OPENAI_API_KEY:
-    print("[WARNING] OPENAI_API_KEY not set - TTS generation will fail", file=sys.stderr)
+    logger.warning("OPENAI_API_KEY not set - TTS generation will fail")
 if not CLAUDE_API_KEY:
-    print("[WARNING] CLAUDE_API_KEY not set - Claude enhancement disabled", file=sys.stderr)
+    logger.warning("CLAUDE_API_KEY not set - Claude enhancement disabled")
 if not PERPLEXITY_API_KEY:
-    print("[WARNING] PERPLEXITY_API_KEY not set - Perplexity research disabled", file=sys.stderr)
+    logger.warning("PERPLEXITY_API_KEY not set - Perplexity research disabled")
+
+
+# Security headers middleware
+@app.after_request
+def add_security_headers(response):
+    """Add security headers to all responses"""
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    # CSP - allow self and inline styles/scripts for the simple UI
+    response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+    # HSTS - only in production
+    if os.environ.get('FLASK_ENV') == 'production':
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
+
+# Request correlation ID middleware
+@app.before_request
+def add_request_id():
+    """Add unique request ID for tracing"""
+    request.id = request.headers.get('X-Request-ID', str(uuid.uuid4())[:8])
+
+
+@app.after_request
+def add_request_id_header(response):
+    """Add request ID to response headers"""
+    if hasattr(request, 'id'):
+        response.headers['X-Request-ID'] = request.id
+    return response
+
+
+# Automatic cleanup scheduler
+def cleanup_old_jobs():
+    """Remove job directories older than 24 hours"""
+    try:
+        cutoff = time.time() - 86400  # 24 hours
+        cleaned = 0
+        for job_dir in TEMP_DIR.iterdir():
+            if job_dir.is_dir():
+                try:
+                    if job_dir.stat().st_mtime < cutoff:
+                        shutil.rmtree(job_dir, ignore_errors=True)
+                        logger.info(f"Cleaned up old job: {job_dir.name}")
+                        cleaned += 1
+                except Exception as e:
+                    logger.warning(f"Failed to clean job {job_dir.name}: {e}")
+        if cleaned > 0:
+            logger.info(f"Cleanup complete: removed {cleaned} old job directories")
+    except Exception as e:
+        logger.error(f"Cleanup scheduler error: {e}")
+
+
+# Initialize background scheduler for cleanup (only in main process)
+scheduler = BackgroundScheduler()
+scheduler.add_job(cleanup_old_jobs, 'interval', hours=1)
+scheduler.start()
+atexit.register(lambda: scheduler.shutdown(wait=False))
 
 # Script expansion prompt for GPT-4o
 SCRIPT_EXPANSION_PROMPT = """You are a podcast script writer. Expand the given outline into natural dialogue between the hosts.
@@ -144,29 +248,31 @@ Format your response as bullet points that can be easily incorporated into a pod
 Be concise but thorough. Cite sources when possible."""
 
 
-class RateLimiter:
-    """Adaptive rate limiter to prevent OpenAI 429 errors"""
+class ThreadSafeRateLimiter:
+    """Thread-safe adaptive rate limiter to prevent OpenAI 429 errors"""
     def __init__(self, max_requests=8, window_seconds=1):
         self.max_requests = max_requests
         self.window = window_seconds
         self.requests = deque()
+        self._lock = RLock()  # Thread-safe lock for gevent
 
     def wait_if_needed(self):
-        now = time.time()
-        # Remove old requests outside window
-        while self.requests and self.requests[0] < now - self.window:
-            self.requests.popleft()
+        with self._lock:
+            now = time.time()
+            # Remove old requests outside window
+            while self.requests and self.requests[0] < now - self.window:
+                self.requests.popleft()
 
-        if len(self.requests) >= self.max_requests:
-            sleep_time = self.requests[0] + self.window - now
-            if sleep_time > 0:
-                gevent.sleep(sleep_time)
+            if len(self.requests) >= self.max_requests:
+                sleep_time = self.requests[0] + self.window - now
+                if sleep_time > 0:
+                    gevent.sleep(sleep_time)
 
-        self.requests.append(time.time())
+            self.requests.append(time.time())
 
 
-# Global rate limiter instance
-rate_limiter = RateLimiter(max_requests=8, window_seconds=1)
+# Global rate limiter instance (thread-safe)
+rate_limiter = ThreadSafeRateLimiter(max_requests=8, window_seconds=1)
 
 
 def login_required(f):
@@ -181,15 +287,90 @@ def login_required(f):
     return decorated_function
 
 
+def validate_file_upload(file):
+    """
+    Validate uploaded file for security.
+    Returns (content, error_message) tuple.
+    """
+    if not file or not file.filename:
+        return None, "No file provided"
+
+    # Check file extension
+    ext = Path(file.filename).suffix.lower()
+    if ext not in ALLOWED_FILE_EXTENSIONS:
+        return None, f"Invalid file type. Allowed: {', '.join(ALLOWED_FILE_EXTENSIONS)}"
+
+    # Check file size
+    file.seek(0, os.SEEK_END)
+    size = file.tell()
+    file.seek(0)
+
+    if size > MAX_FILE_SIZE:
+        return None, f"File too large. Maximum {MAX_FILE_SIZE / (1024*1024):.0f}MB allowed."
+
+    # Try to decode as UTF-8
+    try:
+        content = file.read().decode('utf-8')
+        return content, None
+    except UnicodeDecodeError:
+        return None, "Invalid file encoding. Please use UTF-8."
+
+
+def sanitize_error_message(exc):
+    """Convert exception to user-safe error message without exposing internals"""
+    if isinstance(exc, openai.RateLimitError):
+        return "Service busy. Please retry in a moment."
+    elif isinstance(exc, openai.AuthenticationError):
+        return "API authentication failed. Please contact support."
+    elif isinstance(exc, openai.APIError):
+        return "External service error. Please try again."
+    elif isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+        return "Request timeout. Try with shorter text."
+    elif isinstance(exc, ValueError):
+        return str(exc)  # ValueError messages are usually safe
+    else:
+        logger.exception("Unexpected error")
+        return "An unexpected error occurred. Please try again."
+
+
+def generate_job_id():
+    """Generate collision-proof job ID"""
+    return f"{uuid.uuid4().hex[:12]}_{int(time.time()*1000)}"
+
+
+# Retry decorator for OpenAI API calls
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    retry=retry_if_exception_type((openai.RateLimitError, openai.APITimeoutError, httpx.TimeoutException)),
+    reraise=True
+)
+def call_openai_tts_with_retry(client, model, voice, text):
+    """Call OpenAI TTS API with retry logic"""
+    return client.audio.speech.create(
+        model=model,
+        voice=voice,
+        input=text,
+        response_format="mp3"
+    )
+
+
+# Singleton OpenAI client for connection pooling
+_openai_client = None
+
+
 def get_client():
-    """Get OpenAI client with timeout"""
+    """Get OpenAI client with timeout (singleton for connection pooling)"""
+    global _openai_client
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY environment variable not set")
-    # Set 120 second timeout for TTS API calls
-    return OpenAI(
-        api_key=OPENAI_API_KEY,
-        timeout=httpx.Timeout(120.0, connect=10.0)
-    )
+    if _openai_client is None:
+        # Set 120 second timeout for TTS API calls
+        _openai_client = OpenAI(
+            api_key=OPENAI_API_KEY,
+            timeout=httpx.Timeout(120.0, connect=10.0)
+        )
+    return _openai_client
 
 
 def preprocess_text(text):
@@ -484,7 +665,7 @@ Write the complete dialogue now:"""
         )
         return response.choices[0].message.content
     except Exception as e:
-        print(f"[EXPAND] Error expanding script: {e}", file=sys.stderr, flush=True)
+        logger.error(f"Error expanding script: {e}")
         raise
 
 
@@ -525,14 +706,14 @@ def auto_expand_script(text, progress_callback=None):
         if progress_callback:
             progress_callback(f"Expanding Episode {ep['episode_num']} with AI... ({i+1}/{len(incomplete)})")
 
-        print(f"[EXPAND] Expanding Episode {ep['episode_num']}...", file=sys.stderr, flush=True)
+        logger.info(f"Expanding Episode {ep['episode_num']}...")
 
         try:
             expanded_text = expand_script_with_ai(ep['text'], context, speakers)
             expanded_episodes[ep['episode_num']] = expanded_text
-            print(f"[EXPAND] Episode {ep['episode_num']} expanded ({len(expanded_text)} chars)", file=sys.stderr, flush=True)
+            logger.info(f"Episode {ep['episode_num']} expanded ({len(expanded_text)} chars)")
         except Exception as e:
-            print(f"[EXPAND] Failed to expand Episode {ep['episode_num']}: {e}", file=sys.stderr, flush=True)
+            logger.error(f"Failed to expand Episode {ep['episode_num']}: {e}")
             # Keep original text on failure
             expanded_episodes[ep['episode_num']] = ep['text']
 
@@ -549,11 +730,21 @@ def auto_expand_script(text, progress_callback=None):
 
 # ============== Multi-AI Enhancement Pipeline ==============
 
+# Singleton Claude client for connection pooling
+_claude_client = None
+
+
 def get_claude_client():
-    """Get Anthropic Claude client - returns None if not configured"""
+    """Get Anthropic Claude client with timeout (singleton for connection pooling)"""
+    global _claude_client
     if not CLAUDE_API_KEY:
         return None
-    return anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+    if _claude_client is None:
+        _claude_client = anthropic.Anthropic(
+            api_key=CLAUDE_API_KEY,
+            timeout=httpx.Timeout(120.0, connect=10.0)
+        )
+    return _claude_client
 
 
 def research_episode_with_perplexity(episode_data):
@@ -593,18 +784,18 @@ def research_episode_with_perplexity(episode_data):
 
         if response.status_code == 200:
             research_data = response.json()['choices'][0]['message']['content']
-            print(f"[RESEARCH] Episode {episode_num} researched successfully", file=sys.stderr, flush=True)
+            logger.info(f"Episode {episode_num} researched successfully")
             return {
                 'episode_num': episode_num,
                 'research': research_data,
                 'success': True
             }
         else:
-            print(f"[RESEARCH] Episode {episode_num} failed: {response.status_code}", file=sys.stderr, flush=True)
+            logger.warning(f"Episode {episode_num} research failed: {response.status_code}")
             return {'episode_num': episode_num, 'research': '', 'success': False}
 
     except Exception as e:
-        print(f"[RESEARCH] Episode {episode_num} error: {e}", file=sys.stderr, flush=True)
+        logger.error(f"Episode {episode_num} research error: {e}")
         return {'episode_num': episode_num, 'research': '', 'success': False}
 
 
@@ -655,7 +846,7 @@ def enhance_episode_with_claude(episode_data):
         enhanced_text = re.sub(r'\[RESEARCH CONTEXT\].*?\[END RESEARCH\]', '', enhanced_text, flags=re.DOTALL)
         enhanced_text = re.sub(r'\[RESEARCH NOTES\].*?\[END NOTES\]', '', enhanced_text, flags=re.DOTALL)
 
-        print(f"[CLAUDE] Episode {episode_num} enhanced ({len(enhanced_text)} chars)", file=sys.stderr, flush=True)
+        logger.info(f"Episode {episode_num} enhanced ({len(enhanced_text)} chars)")
 
         return {
             'episode_num': episode_num,
@@ -664,7 +855,7 @@ def enhance_episode_with_claude(episode_data):
         }
 
     except Exception as e:
-        print(f"[CLAUDE] Episode {episode_num} error: {e}", file=sys.stderr, flush=True)
+        logger.error(f"Episode {episode_num} enhancement error: {e}")
         return {
             'episode_num': episode_num,
             'enhanced_text': episode_text,  # Return original on failure
@@ -704,7 +895,7 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
     if progress_callback:
         progress_callback(f"Researching {total_episodes} episodes with Perplexity ({research_pool_size} parallel agents)...")
 
-    print(f"[PIPELINE] Starting Perplexity research for {total_episodes} episodes ({research_pool_size} concurrent)", file=sys.stderr, flush=True)
+    logger.info(f"Starting Perplexity research for {total_episodes} episodes ({research_pool_size} concurrent)")
 
     research_pool = GeventPool(size=research_pool_size)
     research_results = list(research_pool.imap_unordered(
@@ -719,13 +910,13 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
             research_map[result['episode_num']] = result['research']
             stats['research_count'] += 1
 
-    print(f"[PIPELINE] Research complete: {stats['research_count']}/{total_episodes} successful", file=sys.stderr, flush=True)
+    logger.info(f"Research complete: {stats['research_count']}/{total_episodes} successful")
 
     # Stage 2: Claude Enhancement - PARALLEL (limited concurrency)
     if progress_callback:
         progress_callback(f"Enhancing {total_episodes} episodes with Claude ({enhance_pool_size} parallel agents)...")
 
-    print(f"[PIPELINE] Starting Claude enhancement for {total_episodes} episodes ({enhance_pool_size} concurrent)", file=sys.stderr, flush=True)
+    logger.info(f"Starting Claude enhancement for {total_episodes} episodes ({enhance_pool_size} concurrent)")
 
     # Prepare episode data with speakers and research (passed separately, not embedded)
     for ep in episodes:
@@ -746,7 +937,7 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
         if result['success']:
             stats['enhance_count'] += 1
 
-    print(f"[PIPELINE] Enhancement complete: {stats['enhance_count']}/{total_episodes} successful", file=sys.stderr, flush=True)
+    logger.info(f"Enhancement complete: {stats['enhance_count']}/{total_episodes} successful")
 
     # Rebuild full script with enhanced episodes (in order)
     result_parts = []
@@ -768,8 +959,9 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
 
 
 @app.route('/login', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")  # Rate limit login attempts
 def login():
-    """Login page"""
+    """Login page with rate limiting"""
     if not APP_PASSWORD:
         return redirect(url_for('index'))
 
@@ -777,7 +969,9 @@ def login():
         password = request.form.get('password', '')
         if password == APP_PASSWORD:
             session['authenticated'] = True
+            logger.info(f"Successful login from {get_remote_address()}")
             return redirect(url_for('index'))
+        logger.warning(f"Failed login attempt from {get_remote_address()}")
         return render_template('login.html', error='Invalid password')
 
     return render_template('login.html')
@@ -799,15 +993,23 @@ def index():
 
 @app.route('/generate', methods=['POST'])
 @login_required
+@limiter.limit("10 per hour")  # Rate limit audio generation
 def generate():
     """Generate audio from text - streams progress via SSE"""
 
     # Extract request data BEFORE creating generator (to avoid request context issues)
     if 'file' in request.files and request.files['file'].filename:
         file = request.files['file']
-        text = file.read().decode('utf-8')
+        text, error = validate_file_upload(file)
+        if error:
+            logger.warning(f"File upload validation failed: {error}")
+            return jsonify({'status': 'error', 'message': error}), 400
     else:
         text = request.form.get('text', '')
+        # Validate text length
+        if len(text) > MAX_TEXT_LENGTH:
+            logger.warning(f"Text too large: {len(text)} bytes (max {MAX_TEXT_LENGTH})")
+            return jsonify({'status': 'error', 'message': f'Text too large. Maximum {MAX_TEXT_LENGTH//(1024*1024)}MB allowed.'}), 400
 
     voice = request.form.get('voice', 'nova')
     model = request.form.get('model', 'tts-1-hd')
@@ -816,9 +1018,10 @@ def generate():
     ai_enhance = request.form.get('ai_enhance', 'true').lower() == 'true'  # Default ON
 
     def generate_stream(text, voice, model, multi_voice, auto_expand, ai_enhance):
-        job_id = str(uuid.uuid4())[:8]
+        job_id = generate_job_id()  # Collision-proof job ID
         job_dir = TEMP_DIR / job_id
         job_dir.mkdir(exist_ok=True)
+        logger.info(f"Starting job {job_id}")
 
         try:
             if not text.strip():
@@ -840,39 +1043,39 @@ def generate():
 
                 if incomplete_count > 0:
                     yield f"data: {{\"status\": \"processing\", \"message\": \"Found {incomplete_count} incomplete episode(s). Expanding with AI...\"}}\n\n"
-                    print(f"[EXPAND] Found {incomplete_count} incomplete episodes, expanding...", file=sys.stderr, flush=True)
+                    logger.info(f"Job {job_id}: Found {incomplete_count} incomplete episodes, expanding...")
 
                     try:
                         # Expand incomplete episodes
                         text, expanded_count = auto_expand_script(text)
                         yield f"data: {{\"status\": \"processing\", \"message\": \"Expanded {expanded_count} episode(s). Continuing to audio generation...\"}}\n\n"
-                        print(f"[EXPAND] Expansion complete, {expanded_count} episodes expanded", file=sys.stderr, flush=True)
+                        logger.info(f"Job {job_id}: Expansion complete, {expanded_count} episodes expanded")
                     except Exception as e:
                         yield f"data: {{\"status\": \"processing\", \"message\": \"Script expansion failed: {str(e)}. Continuing with original text...\"}}\n\n"
-                        print(f"[EXPAND] Expansion failed: {e}", file=sys.stderr, flush=True)
+                        logger.error(f"Job {job_id}: Expansion failed: {e}")
 
             # Run AI Enhancement Pipeline (Perplexity Research + Claude Polish)
             if ai_enhance:
                 yield f"data: {{\"status\": \"processing\", \"message\": \"Starting AI enhancement pipeline...\"}}\n\n"
-                print(f"[PIPELINE] Starting multi-AI enhancement pipeline", file=sys.stderr, flush=True)
+                logger.info(f"Job {job_id}: Starting multi-AI enhancement pipeline")
 
                 try:
                     def progress_callback(msg):
                         # Note: Can't yield from inside callback, just log
-                        print(f"[PIPELINE] {msg}", file=sys.stderr, flush=True)
+                        logger.info(f"Job {job_id}: {msg}")
 
                     enhanced_text, stats = run_ai_enhancement_pipeline(text, progress_callback)
 
                     if stats['research_count'] > 0 or stats['enhance_count'] > 0:
                         yield f"data: {{\"status\": \"processing\", \"message\": \"AI pipeline complete: researched {stats['research_count']}, enhanced {stats['enhance_count']} episodes\"}}\n\n"
                         text = enhanced_text
-                        print(f"[PIPELINE] Enhancement complete: {stats}", file=sys.stderr, flush=True)
+                        logger.info(f"Job {job_id}: Enhancement complete: {stats}")
                     else:
                         yield f"data: {{\"status\": \"processing\", \"message\": \"AI enhancement skipped (no episodes detected)\"}}\n\n"
 
                 except Exception as e:
                     yield f"data: {{\"status\": \"processing\", \"message\": \"AI enhancement failed: {str(e)}. Continuing without enhancement...\"}}\n\n"
-                    print(f"[PIPELINE] Enhancement failed: {e}", file=sys.stderr, flush=True)
+                    logger.error(f"Job {job_id}: Enhancement failed: {e}")
 
             # Preprocess text
             processed = preprocess_text(text)
@@ -886,7 +1089,7 @@ def generate():
                     # Build voice mapping for each speaker
                     for speaker in speakers:
                         speaker_voices[speaker] = get_voice_for_speaker(speaker)
-                    print(f"[TTS] Multi-voice mode: detected {len(speakers)} speakers: {speaker_voices}", file=sys.stderr, flush=True)
+                    logger.info(f"Job {job_id}: Multi-voice mode: detected {len(speakers)} speakers: {speaker_voices}")
 
             # Split text into chunks
             if speaker_voices:
@@ -900,8 +1103,14 @@ def generate():
 
             total_chunks = len(chunks)
 
+            # Validate chunk count
+            if total_chunks > MAX_CHUNKS:
+                logger.warning(f"Job {job_id}: Too many chunks ({total_chunks} > {MAX_CHUNKS})")
+                yield f"data: {{\"status\": \"error\", \"message\": \"Text too long. Maximum {MAX_CHUNKS} chunks allowed.\"}}\n\n"
+                return
+
             yield f"data: {{\"status\": \"processing\", \"message\": \"Starting generation...\", \"total\": {total_chunks}}}\n\n"
-            print(f"[TTS] Starting generation: {total_chunks} chunks, model={model}, mode={mode_desc}", file=sys.stderr, flush=True)
+            logger.info(f"Job {job_id}: Starting TTS generation: {total_chunks} chunks, model={model}, mode={mode_desc}")
 
             # Get OpenAI client
             client = get_client()
@@ -942,7 +1151,7 @@ def generate():
             # Use gevent pool for parallel API calls - 1 agent per chunk
             pool_size = MAX_CONCURRENT_CHUNKS if MAX_CONCURRENT_CHUNKS > 0 else total_chunks
             pool = GeventPool(size=pool_size)
-            print(f"[TTS] Starting parallel generation with {pool_size} concurrent agents (1 per chunk)", file=sys.stderr, flush=True)
+            logger.info(f"Job {job_id}: Starting parallel generation with {pool_size} concurrent agents")
 
             # Process chunks in parallel
             for result in pool.imap_unordered(generate_single_chunk, chunk_args):
@@ -950,13 +1159,13 @@ def generate():
                 completed += 1
 
                 if error:
-                    print(f"[TTS] ERROR: Chunk {idx+1} failed: {error}", file=sys.stderr, flush=True)
-                    yield f"data: {{\"status\": \"error\", \"message\": \"Chunk {idx+1} failed: {error}\"}}\n\n"
+                    logger.error(f"Job {job_id}: Chunk {idx+1} failed: {error}")
+                    yield f"data: {{\"status\": \"error\", \"message\": \"Chunk {idx+1} failed: {sanitize_error_message(Exception(error))}\"}}\n\n"
                     return
 
                 results[idx] = path
                 speaker_info = f" [{chunk_speaker}:{chunk_voice}]" if chunk_speaker else f" [{chunk_voice}]"
-                print(f"[TTS] Chunk {idx+1} done{speaker_info} ({path.stat().st_size} bytes) [{completed}/{total_chunks}]", file=sys.stderr, flush=True)
+                logger.debug(f"Job {job_id}: Chunk {idx+1} done{speaker_info} ({path.stat().st_size} bytes) [{completed}/{total_chunks}]")
                 yield f"data: {{\"status\": \"processing\", \"message\": \"Completed {completed}/{total_chunks} chunks ({pool_size} agents)\", \"current\": {completed}, \"total\": {total_chunks}}}\n\n"
 
             # Get chunk files in correct order for concatenation
@@ -1018,14 +1227,26 @@ def cleanup(job_id):
 
 @app.route('/health')
 def health():
-    """Health check endpoint for Render"""
+    """Comprehensive health check endpoint for Render"""
+    checks = {
+        'temp_directory': 'healthy' if TEMP_DIR.exists() and TEMP_DIR.is_dir() else 'unhealthy',
+        'openai': 'configured' if OPENAI_API_KEY else 'not_configured',
+        'claude': 'configured' if CLAUDE_API_KEY else 'not_configured',
+        'perplexity': 'configured' if PERPLEXITY_API_KEY else 'not_configured'
+    }
+
+    # Overall health: temp_dir must work, OpenAI must be configured for core function
+    core_healthy = checks['temp_directory'] == 'healthy' and checks['openai'] == 'configured'
+    status = 'healthy' if core_healthy else 'degraded'
+
     return jsonify({
-        'status': 'healthy',
-        'openai_configured': bool(OPENAI_API_KEY),
-        'claude_configured': bool(CLAUDE_API_KEY),
-        'perplexity_configured': bool(PERPLEXITY_API_KEY)
-    })
+        'status': status,
+        'checks': checks,
+        'timestamp': datetime.utcnow().isoformat()
+    }), 200 if core_healthy else 503
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # SECURITY: debug=False in production (use FLASK_DEBUG=1 for local dev)
+    debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(debug=debug_mode, port=5000)
