@@ -76,6 +76,18 @@ FEMALE_NAMES = {
 # Parallel processing configuration
 # Set to 0 for unlimited (1 agent per chunk), or a number to limit concurrent workers
 MAX_CONCURRENT_CHUNKS = int(os.environ.get('TTS_MAX_CONCURRENT', '0'))  # 0 = unlimited (1 per chunk)
+MAX_AI_CONCURRENT = int(os.environ.get('AI_MAX_CONCURRENT', '5'))  # Limit concurrent AI API calls
+
+# Claude model configuration (allows updating without code change)
+CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-20250514')
+
+# Startup warnings for missing API keys
+if not OPENAI_API_KEY:
+    print("[WARNING] OPENAI_API_KEY not set - TTS generation will fail", file=sys.stderr)
+if not CLAUDE_API_KEY:
+    print("[WARNING] CLAUDE_API_KEY not set - Claude enhancement disabled", file=sys.stderr)
+if not PERPLEXITY_API_KEY:
+    print("[WARNING] PERPLEXITY_API_KEY not set - Perplexity research disabled", file=sys.stderr)
 
 # Script expansion prompt for GPT-4o
 SCRIPT_EXPANSION_PROMPT = """You are a podcast script writer. Expand the given outline into natural dialogue between the hosts.
@@ -383,12 +395,12 @@ def is_episode_incomplete(episode_text):
     word_count = sum(len(line.split()) for line in content_lines)
 
     # Episode is incomplete if:
-    # 1. No dialogue AND has outline markers, OR
-    # 2. Has parenthetical instructions, OR
+    # 1. No dialogue AND has outline markers (bullets, numbers, or paren instructions), OR
+    # 2. Has parenthetical instructions like "(describe...)" even if it has some dialogue, OR
     # 3. Very short content with instruction words
-    if not has_dialogue and (has_bullets or has_numbered_list or has_paren_instructions):
+    if not has_dialogue and (has_bullets or has_numbered_list):
         return True
-    if has_paren_instructions:
+    if has_paren_instructions:  # Always expand if has "(describe...)" style instructions
         return True
     if word_count < 200 and has_instructions:
         return True
@@ -408,7 +420,7 @@ def parse_episodes(text):
 
     if not matches:
         # No episode structure found - treat as single complete script
-        return [{'text': text, 'header': '', 'is_complete': True, 'episode_num': 0}]
+        return [{'text': text, 'header': '', 'is_complete': True, 'episode_num': 1}]
 
     episodes = []
     for match in matches:
@@ -538,9 +550,9 @@ def auto_expand_script(text, progress_callback=None):
 # ============== Multi-AI Enhancement Pipeline ==============
 
 def get_claude_client():
-    """Get Anthropic Claude client"""
+    """Get Anthropic Claude client - returns None if not configured"""
     if not CLAUDE_API_KEY:
-        raise ValueError("CLAUDE_API_KEY not configured")
+        return None
     return anthropic.Anthropic(api_key=CLAUDE_API_KEY)
 
 
@@ -552,6 +564,10 @@ def research_episode_with_perplexity(episode_data):
     episode_num = episode_data.get('episode_num', 0)
     episode_text = episode_data.get('text', '')
     header = episode_data.get('header', '')
+
+    # Check if API key is configured
+    if not PERPLEXITY_API_KEY:
+        return {'episode_num': episode_num, 'research': '', 'success': False}
 
     # Extract the main topic from the episode header/content
     topic = header if header else episode_text[:500]
@@ -600,24 +616,45 @@ def enhance_episode_with_claude(episode_data):
     episode_num = episode_data.get('episode_num', 0)
     episode_text = episode_data.get('text', '')
     speakers = episode_data.get('speakers', [])
+    research_context = episode_data.get('research', '')  # Get research separately
+
+    # Check if Claude is configured
+    client = get_claude_client()
+    if not client:
+        return {
+            'episode_num': episode_num,
+            'enhanced_text': episode_text,  # Return original if no Claude
+            'success': False
+        }
 
     try:
-        client = get_claude_client()
-
         speaker_list = ', '.join(speakers) if speakers else 'ALEX, SARAH'
 
+        # Build prompt with research context (but don't embed markers in output)
+        prompt_parts = [CLAUDE_ENHANCEMENT_PROMPT, f"\n\nSPEAKERS: {speaker_list}"]
+
+        if research_context:
+            prompt_parts.append(f"\n\nRESEARCH NOTES (use to verify/enhance facts, do NOT include these markers in output):\n{research_context}")
+
+        prompt_parts.append(f"\n\nEPISODE TO ENHANCE:\n{episode_text}")
+
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_MODEL,
             max_tokens=8000,
             messages=[
                 {
                     "role": "user",
-                    "content": f"{CLAUDE_ENHANCEMENT_PROMPT}\n\nSPEAKERS: {speaker_list}\n\nEPISODE TO ENHANCE:\n{episode_text}"
+                    "content": ''.join(prompt_parts)
                 }
             ]
         )
 
         enhanced_text = response.content[0].text
+
+        # Strip any research markers that might have leaked through
+        enhanced_text = re.sub(r'\[RESEARCH CONTEXT\].*?\[END RESEARCH\]', '', enhanced_text, flags=re.DOTALL)
+        enhanced_text = re.sub(r'\[RESEARCH NOTES\].*?\[END NOTES\]', '', enhanced_text, flags=re.DOTALL)
+
         print(f"[CLAUDE] Episode {episode_num} enhanced ({len(enhanced_text)} chars)", file=sys.stderr, flush=True)
 
         return {
@@ -640,9 +677,9 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
     Run the full multi-AI enhancement pipeline with parallel agents.
 
     Pipeline stages:
-    1. Perplexity Research (parallel per episode)
+    1. Perplexity Research (parallel per episode, limited concurrency)
     2. GPT-4o Expansion (parallel per incomplete episode) - already called separately
-    3. Claude Enhancement (parallel per episode)
+    3. Claude Enhancement (parallel per episode, limited concurrency)
 
     Returns: (enhanced_text, stats_dict)
     """
@@ -659,19 +696,23 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
 
     stats = {'research_count': 0, 'enhance_count': 0}
 
-    # Stage 1: Perplexity Research - PARALLEL
+    # Limit concurrent API calls to prevent rate limiting
+    research_pool_size = min(MAX_AI_CONCURRENT, total_episodes)
+    enhance_pool_size = min(MAX_AI_CONCURRENT, total_episodes)
+
+    # Stage 1: Perplexity Research - PARALLEL (limited concurrency)
     if progress_callback:
-        progress_callback(f"Researching {total_episodes} episodes with Perplexity ({total_episodes} parallel agents)...")
+        progress_callback(f"Researching {total_episodes} episodes with Perplexity ({research_pool_size} parallel agents)...")
 
-    print(f"[PIPELINE] Starting Perplexity research for {total_episodes} episodes", file=sys.stderr, flush=True)
+    print(f"[PIPELINE] Starting Perplexity research for {total_episodes} episodes ({research_pool_size} concurrent)", file=sys.stderr, flush=True)
 
-    research_pool = GeventPool(size=total_episodes)
+    research_pool = GeventPool(size=research_pool_size)
     research_results = list(research_pool.imap_unordered(
         research_episode_with_perplexity,
         episodes
     ))
 
-    # Build research context map
+    # Build research context map (don't inject into text, pass separately)
     research_map = {}
     for result in research_results:
         if result['success']:
@@ -680,25 +721,19 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
 
     print(f"[PIPELINE] Research complete: {stats['research_count']}/{total_episodes} successful", file=sys.stderr, flush=True)
 
-    # Inject research into episodes
-    for ep in episodes:
-        ep_num = ep['episode_num']
-        if ep_num in research_map:
-            # Add research context to episode text
-            research_context = f"\n\n[RESEARCH CONTEXT]\n{research_map[ep_num]}\n[END RESEARCH]\n\n"
-            ep['text'] = ep['text'] + research_context
-
-    # Stage 2: Claude Enhancement - PARALLEL
+    # Stage 2: Claude Enhancement - PARALLEL (limited concurrency)
     if progress_callback:
-        progress_callback(f"Enhancing {total_episodes} episodes with Claude ({total_episodes} parallel agents)...")
+        progress_callback(f"Enhancing {total_episodes} episodes with Claude ({enhance_pool_size} parallel agents)...")
 
-    print(f"[PIPELINE] Starting Claude enhancement for {total_episodes} episodes", file=sys.stderr, flush=True)
+    print(f"[PIPELINE] Starting Claude enhancement for {total_episodes} episodes ({enhance_pool_size} concurrent)", file=sys.stderr, flush=True)
 
-    # Prepare episode data with speakers
+    # Prepare episode data with speakers and research (passed separately, not embedded)
     for ep in episodes:
         ep['speakers'] = speakers
+        ep_num = ep['episode_num']
+        ep['research'] = research_map.get(ep_num, '')  # Pass research separately
 
-    enhance_pool = GeventPool(size=total_episodes)
+    enhance_pool = GeventPool(size=enhance_pool_size)
     enhance_results = list(enhance_pool.imap_unordered(
         enhance_episode_with_claude,
         episodes
@@ -718,7 +753,9 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
     for ep in sorted(episodes, key=lambda x: x['episode_num']):
         ep_num = ep['episode_num']
         if ep_num in enhanced_map:
-            result_parts.append(enhanced_map[ep_num])
+            # Strip any remaining markers from the output (safety check)
+            clean_text = re.sub(r'\[RESEARCH[^\]]*\].*?\[END[^\]]*\]', '', enhanced_map[ep_num], flags=re.DOTALL)
+            result_parts.append(clean_text.strip())
         else:
             result_parts.append(ep['text'])
 
@@ -984,7 +1021,9 @@ def health():
     """Health check endpoint for Render"""
     return jsonify({
         'status': 'healthy',
-        'api_key_configured': bool(OPENAI_API_KEY)
+        'openai_configured': bool(OPENAI_API_KEY),
+        'claude_configured': bool(CLAUDE_API_KEY),
+        'perplexity_configured': bool(PERPLEXITY_API_KEY)
     })
 
 
