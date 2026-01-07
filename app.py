@@ -38,6 +38,37 @@ TEMP_DIR.mkdir(exist_ok=True)
 VOICES = ['nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer']
 MODELS = ['tts-1-hd', 'tts-1']
 
+# Multi-voice speaker detection - gender-based voice mapping
+VOICE_MAP = {
+    'male': 'echo',
+    'female': 'shimmer',
+    'neutral': 'alloy'
+}
+
+# Common names for gender detection (first names only, lowercase)
+MALE_NAMES = {
+    'alex', 'john', 'mike', 'michael', 'david', 'james', 'robert', 'chris', 'christopher',
+    'daniel', 'matthew', 'andrew', 'josh', 'joshua', 'ryan', 'brandon', 'jason', 'justin',
+    'brian', 'kevin', 'eric', 'steve', 'steven', 'mark', 'paul', 'adam', 'scott', 'greg',
+    'jeff', 'jeffrey', 'tim', 'timothy', 'tom', 'thomas', 'joe', 'joseph', 'nick', 'nicholas',
+    'tony', 'anthony', 'ben', 'benjamin', 'sam', 'samuel', 'jake', 'jacob', 'ethan', 'noah',
+    'william', 'bill', 'richard', 'rick', 'charles', 'charlie', 'george', 'peter', 'patrick',
+    'sean', 'kyle', 'tyler', 'aaron', 'nathan', 'jordan', 'dylan', 'luke', 'evan', 'austin',
+    'host', 'narrator', 'announcer'  # Generic male-coded roles
+}
+
+FEMALE_NAMES = {
+    'sarah', 'emma', 'lisa', 'mary', 'jennifer', 'amanda', 'jessica', 'ashley', 'emily',
+    'elizabeth', 'megan', 'lauren', 'rachel', 'stephanie', 'nicole', 'heather', 'michelle',
+    'amber', 'melissa', 'tiffany', 'christina', 'rebecca', 'laura', 'danielle', 'brittany',
+    'kimberly', 'kelly', 'crystal', 'amy', 'angela', 'andrea', 'anna', 'hannah', 'samantha',
+    'katherine', 'kate', 'katie', 'karen', 'nancy', 'betty', 'sandra', 'margaret', 'susan',
+    'dorothy', 'patricia', 'linda', 'barbara', 'helen', 'maria', 'sophia', 'olivia', 'ava',
+    'isabella', 'mia', 'charlotte', 'abigail', 'harper', 'evelyn', 'madison', 'grace', 'chloe',
+    'victoria', 'natalie', 'julia', 'lily', 'claire', 'zoe', 'leah', 'audrey', 'maya', 'lucy',
+    'hostess', 'co-host'  # Generic female-coded roles
+}
+
 # Parallel processing configuration
 # Set to 0 for unlimited (1 agent per chunk), or a number to limit concurrent workers
 MAX_CONCURRENT_CHUNKS = int(os.environ.get('TTS_MAX_CONCURRENT', '0'))  # 0 = unlimited (1 per chunk)
@@ -160,6 +191,112 @@ def concatenate_mp3_files(file_paths, output_path):
     return output_path
 
 
+def detect_speakers(text):
+    """Extract unique speaker names from script (e.g., ALEX:, SARAH:)"""
+    # Match patterns like "ALEX:", "Sarah:", "GUEST EXPERT:" at start of lines
+    pattern = r'^([A-Z][A-Za-z0-9 ]+?):\s'
+    speakers = set(re.findall(pattern, text, re.MULTILINE))
+    return list(speakers)
+
+
+def detect_gender(name):
+    """Detect gender from speaker name using common name lists"""
+    # Extract first word of name (e.g., "Guest Expert" -> "guest")
+    first_name = name.lower().split()[0]
+
+    if first_name in MALE_NAMES:
+        return 'male'
+    elif first_name in FEMALE_NAMES:
+        return 'female'
+    return 'neutral'
+
+
+def get_voice_for_speaker(speaker_name):
+    """Get the appropriate voice for a speaker based on gender detection"""
+    gender = detect_gender(speaker_name)
+    return VOICE_MAP.get(gender, 'alloy')
+
+
+def split_by_speaker(text, speaker_voices, max_chars=2000):
+    """
+    Split text into chunks by speaker, respecting max character limit.
+    Returns list of dicts: {'speaker': 'ALEX', 'text': '...', 'voice': 'echo'}
+    """
+    # Pattern to match speaker lines like "ALEX:" or "SARAH:" at start
+    speaker_pattern = r'^([A-Z][A-Za-z0-9 ]+?):\s*'
+
+    segments = []
+    current_speaker = None
+    current_text = []
+
+    for line in text.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+
+        # Check if this line starts with a speaker name
+        match = re.match(speaker_pattern, line)
+        if match:
+            # Save previous speaker's content
+            if current_speaker and current_text:
+                segments.append({
+                    'speaker': current_speaker,
+                    'text': ' '.join(current_text),
+                    'voice': speaker_voices.get(current_speaker, 'alloy')
+                })
+
+            # Start new speaker
+            current_speaker = match.group(1)
+            # Get the text after the speaker name
+            remaining_text = line[match.end():].strip()
+            current_text = [remaining_text] if remaining_text else []
+        elif current_speaker:
+            # Continuation of current speaker's dialogue
+            current_text.append(line)
+
+    # Don't forget the last speaker's content
+    if current_speaker and current_text:
+        segments.append({
+            'speaker': current_speaker,
+            'text': ' '.join(current_text),
+            'voice': speaker_voices.get(current_speaker, 'alloy')
+        })
+
+    # Now split any segments that exceed max_chars while preserving speaker/voice
+    final_chunks = []
+    for seg in segments:
+        text = seg['text']
+        if len(text) <= max_chars:
+            if text.strip():  # Only add non-empty chunks
+                final_chunks.append(seg)
+        else:
+            # Split long text into smaller chunks by sentences
+            sentences = re.split(r'(?<=[.!?])\s+', text)
+            current_chunk = ""
+
+            for sentence in sentences:
+                if len(current_chunk) + len(sentence) < max_chars:
+                    current_chunk += sentence + " "
+                else:
+                    if current_chunk.strip():
+                        final_chunks.append({
+                            'speaker': seg['speaker'],
+                            'text': current_chunk.strip(),
+                            'voice': seg['voice']
+                        })
+                    current_chunk = sentence + " "
+
+            # Add remaining text
+            if current_chunk.strip():
+                final_chunks.append({
+                    'speaker': seg['speaker'],
+                    'text': current_chunk.strip(),
+                    'voice': seg['voice']
+                })
+
+    return final_chunks
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Login page"""
@@ -204,8 +341,9 @@ def generate():
 
     voice = request.form.get('voice', 'nova')
     model = request.form.get('model', 'tts-1-hd')
+    multi_voice = request.form.get('multi_voice', 'false').lower() == 'true'
 
-    def generate_stream(text, voice, model):
+    def generate_stream(text, voice, model, multi_voice):
         job_id = str(uuid.uuid4())[:8]
         job_dir = TEMP_DIR / job_id
         job_dir.mkdir(exist_ok=True)
@@ -220,13 +358,34 @@ def generate():
             if model not in MODELS:
                 model = 'tts-1-hd'
 
-            # Preprocess and split
+            # Preprocess text
             processed = preprocess_text(text)
-            chunks = split_into_chunks(processed)
+
+            # Check for multi-voice mode with speaker detection
+            speaker_voices = {}
+            if multi_voice:
+                # Detect speakers from the original text (before preprocessing removes the markers)
+                speakers = detect_speakers(text)
+                if speakers:
+                    # Build voice mapping for each speaker
+                    for speaker in speakers:
+                        speaker_voices[speaker] = get_voice_for_speaker(speaker)
+                    print(f"[TTS] Multi-voice mode: detected {len(speakers)} speakers: {speaker_voices}", file=sys.stderr, flush=True)
+
+            # Split text into chunks
+            if speaker_voices:
+                # Multi-voice: split by speaker boundaries
+                chunks = split_by_speaker(text, speaker_voices)
+                mode_desc = f"multi-voice ({len(speaker_voices)} speakers)"
+            else:
+                # Single voice: split by length only
+                chunks = [{'text': chunk, 'voice': voice, 'speaker': None} for chunk in split_into_chunks(processed)]
+                mode_desc = f"single-voice ({voice})"
+
             total_chunks = len(chunks)
 
             yield f"data: {{\"status\": \"processing\", \"message\": \"Starting generation...\", \"total\": {total_chunks}}}\n\n"
-            print(f"[TTS] Starting generation: {total_chunks} chunks, model={model}, voice={voice}", file=sys.stderr, flush=True)
+            print(f"[TTS] Starting generation: {total_chunks} chunks, model={model}, mode={mode_desc}", file=sys.stderr, flush=True)
 
             # Get OpenAI client
             client = get_client()
@@ -234,7 +393,7 @@ def generate():
             # Generate audio for each chunk IN PARALLEL using gevent
             def generate_single_chunk(args):
                 """Generate a single chunk - called by gevent greenlets"""
-                idx, chunk_text = args
+                idx, chunk_text, chunk_voice, chunk_speaker = args
                 chunk_path = job_dir / f"chunk-{idx:03d}.mp3"
 
                 try:
@@ -243,21 +402,21 @@ def generate():
 
                     response = client.audio.speech.create(
                         model=model,
-                        voice=voice,
+                        voice=chunk_voice,  # Use per-chunk voice
                         input=chunk_text,
                         response_format="mp3"
                     )
                     response.stream_to_file(str(chunk_path))
 
                     if chunk_path.exists() and chunk_path.stat().st_size > 0:
-                        return (idx, chunk_path, None)
+                        return (idx, chunk_path, chunk_voice, chunk_speaker, None)
                     else:
-                        return (idx, None, "Empty file generated")
+                        return (idx, None, chunk_voice, chunk_speaker, "Empty file generated")
                 except Exception as e:
-                    return (idx, None, str(e))
+                    return (idx, None, chunk_voice, chunk_speaker, str(e))
 
-            # Prepare chunk args (index, text) for parallel processing
-            chunk_args = [(i, chunk) for i, chunk in enumerate(chunks)]
+            # Prepare chunk args (index, text, voice, speaker) for parallel processing
+            chunk_args = [(i, chunk['text'], chunk['voice'], chunk.get('speaker')) for i, chunk in enumerate(chunks)]
 
             # Track results by index for ordered concatenation
             results = {}
@@ -271,7 +430,7 @@ def generate():
 
             # Process chunks in parallel
             for result in pool.imap_unordered(generate_single_chunk, chunk_args):
-                idx, path, error = result
+                idx, path, chunk_voice, chunk_speaker, error = result
                 completed += 1
 
                 if error:
@@ -280,7 +439,8 @@ def generate():
                     return
 
                 results[idx] = path
-                print(f"[TTS] Chunk {idx+1} done ({path.stat().st_size} bytes) [{completed}/{total_chunks}]", file=sys.stderr, flush=True)
+                speaker_info = f" [{chunk_speaker}:{chunk_voice}]" if chunk_speaker else f" [{chunk_voice}]"
+                print(f"[TTS] Chunk {idx+1} done{speaker_info} ({path.stat().st_size} bytes) [{completed}/{total_chunks}]", file=sys.stderr, flush=True)
                 yield f"data: {{\"status\": \"processing\", \"message\": \"Completed {completed}/{total_chunks} chunks ({pool_size} agents)\", \"current\": {completed}, \"total\": {total_chunks}}}\n\n"
 
             # Get chunk files in correct order for concatenation
@@ -301,7 +461,7 @@ def generate():
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'message': f'Error: {str(e)}'})}\n\n"
 
-    response = Response(generate_stream(text, voice, model), mimetype='text/event-stream')
+    response = Response(generate_stream(text, voice, model, multi_voice), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['Connection'] = 'keep-alive'
     response.headers['X-Accel-Buffering'] = 'no'  # Critical for Render's nginx proxy

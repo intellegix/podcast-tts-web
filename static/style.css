@@ -390,3 +390,41 @@ footer {
     margin-bottom: 1.5rem;
     text-align: center;
 }
+
+/* Multi-voice checkbox section */
+.checkbox-section {
+    background: rgba(102, 126, 234, 0.1);
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-top: 1rem;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+    accent-color: #667eea;
+    cursor: pointer;
+}
+
+.checkbox-text {
+    color: #e4e4e7;
+    font-size: 1rem;
+}
+
+.multi-voice-hint {
+    display: block;
+    font-size: 0.8rem;
+    color: #a1a1aa;
+    line-height: 1.5;
+    margin-left: 2rem;
+}
