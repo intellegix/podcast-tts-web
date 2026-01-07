@@ -3,19 +3,27 @@ Podcast TTS Web App
 Converts podcast scripts to audio using OpenAI TTS API
 """
 
+# Gevent monkey patching - MUST be before all other imports
+from gevent import monkey
+monkey.patch_all()
+
 import os
 import re
 import json
 import uuid
+import time
 import tempfile
 import shutil
 from pathlib import Path
 from functools import wraps
+from collections import deque
 from flask import Flask, render_template, request, jsonify, send_file, Response, session, redirect, url_for
 
 from openai import OpenAI
 import httpx
 import sys
+import gevent
+from gevent.pool import Pool as GeventPool
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24).hex())
@@ -29,6 +37,35 @@ TEMP_DIR.mkdir(exist_ok=True)
 # OpenAI TTS options
 VOICES = ['nova', 'alloy', 'echo', 'fable', 'onyx', 'shimmer']
 MODELS = ['tts-1-hd', 'tts-1']
+
+# Parallel processing configuration
+# Set to 0 for unlimited (1 agent per chunk), or a number to limit concurrent workers
+MAX_CONCURRENT_CHUNKS = int(os.environ.get('TTS_MAX_CONCURRENT', '0'))  # 0 = unlimited (1 per chunk)
+
+
+class RateLimiter:
+    """Adaptive rate limiter to prevent OpenAI 429 errors"""
+    def __init__(self, max_requests=8, window_seconds=1):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self.requests = deque()
+
+    def wait_if_needed(self):
+        now = time.time()
+        # Remove old requests outside window
+        while self.requests and self.requests[0] < now - self.window:
+            self.requests.popleft()
+
+        if len(self.requests) >= self.max_requests:
+            sleep_time = self.requests[0] + self.window - now
+            if sleep_time > 0:
+                gevent.sleep(sleep_time)
+
+        self.requests.append(time.time())
+
+
+# Global rate limiter instance
+rate_limiter = RateLimiter(max_requests=8, window_seconds=1)
 
 
 def login_required(f):
@@ -194,35 +231,60 @@ def generate():
             # Get OpenAI client
             client = get_client()
 
-            # Generate audio for each chunk
-            chunk_files = []
-            for i, chunk in enumerate(chunks):
-                chunk_path = job_dir / f"chunk-{i:03d}.mp3"
-
-                yield f"data: {{\"status\": \"processing\", \"message\": \"Generating chunk {i+1} of {total_chunks}...\", \"current\": {i+1}, \"total\": {total_chunks}}}\n\n"
-                print(f"[TTS] Generating chunk {i+1}/{total_chunks} ({len(chunk)} chars)...", file=sys.stderr, flush=True)
+            # Generate audio for each chunk IN PARALLEL using gevent
+            def generate_single_chunk(args):
+                """Generate a single chunk - called by gevent greenlets"""
+                idx, chunk_text = args
+                chunk_path = job_dir / f"chunk-{idx:03d}.mp3"
 
                 try:
+                    # Rate limit to prevent 429 errors
+                    rate_limiter.wait_if_needed()
+
                     response = client.audio.speech.create(
                         model=model,
                         voice=voice,
-                        input=chunk,
+                        input=chunk_text,
                         response_format="mp3"
                     )
                     response.stream_to_file(str(chunk_path))
 
                     if chunk_path.exists() and chunk_path.stat().st_size > 0:
-                        chunk_files.append(chunk_path)
-                        print(f"[TTS] Chunk {i+1} done ({chunk_path.stat().st_size} bytes)", file=sys.stderr, flush=True)
+                        return (idx, chunk_path, None)
                     else:
-                        print(f"[TTS] ERROR: Chunk {i+1} failed - empty file", file=sys.stderr, flush=True)
-                        yield f"data: {{\"status\": \"error\", \"message\": \"Failed to generate chunk {i+1}\"}}\n\n"
-                        return
-
+                        return (idx, None, "Empty file generated")
                 except Exception as e:
-                    print(f"[TTS] ERROR: Chunk {i+1} exception: {str(e)}", file=sys.stderr, flush=True)
-                    yield f"data: {json.dumps({'status': 'error', 'message': f'API error: {str(e)}'})}\n\n"
+                    return (idx, None, str(e))
+
+            # Prepare chunk args (index, text) for parallel processing
+            chunk_args = [(i, chunk) for i, chunk in enumerate(chunks)]
+
+            # Track results by index for ordered concatenation
+            results = {}
+            completed = 0
+            errors = []
+
+            # Use gevent pool for parallel API calls - 1 agent per chunk
+            pool_size = MAX_CONCURRENT_CHUNKS if MAX_CONCURRENT_CHUNKS > 0 else total_chunks
+            pool = GeventPool(size=pool_size)
+            print(f"[TTS] Starting parallel generation with {pool_size} concurrent agents (1 per chunk)", file=sys.stderr, flush=True)
+
+            # Process chunks in parallel
+            for result in pool.imap_unordered(generate_single_chunk, chunk_args):
+                idx, path, error = result
+                completed += 1
+
+                if error:
+                    print(f"[TTS] ERROR: Chunk {idx+1} failed: {error}", file=sys.stderr, flush=True)
+                    yield f"data: {{\"status\": \"error\", \"message\": \"Chunk {idx+1} failed: {error}\"}}\n\n"
                     return
+
+                results[idx] = path
+                print(f"[TTS] Chunk {idx+1} done ({path.stat().st_size} bytes) [{completed}/{total_chunks}]", file=sys.stderr, flush=True)
+                yield f"data: {{\"status\": \"processing\", \"message\": \"Completed {completed}/{total_chunks} chunks ({pool_size} agents)\", \"current\": {completed}, \"total\": {total_chunks}}}\n\n"
+
+            # Get chunk files in correct order for concatenation
+            chunk_files = [results[i] for i in sorted(results.keys())]
 
             # Concatenate chunks
             yield f"data: {{\"status\": \"processing\", \"message\": \"Combining audio chunks...\", \"current\": {total_chunks}, \"total\": {total_chunks}}}\n\n"
