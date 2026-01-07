@@ -374,26 +374,84 @@ def get_client():
 
 
 def preprocess_text(text):
-    """Clean text for natural TTS reading"""
-    # Remove markdown headers
-    text = re.sub(r'^#{1,4}\s*', '', text, flags=re.MULTILINE)
+    """
+    Clean text for natural TTS reading.
+    Handles technical content, code blocks, tables, and symbols.
+    """
+    # 1. Remove code blocks entirely (or describe them)
+    text = re.sub(r'```[\s\S]*?```', ' [code example omitted] ', text)
+    text = re.sub(r'`([^`]+)`', r'\1', text)  # Remove backticks but keep content
 
-    # Remove markdown formatting
+    # 2. Remove box-drawing characters and ASCII art
+    box_chars = '├└┌┐┬┴┼─│┘═║╔╗╚╝╠╣╦╩╬▼▲►◄●○■□'
+    for char in box_chars:
+        text = text.replace(char, ' ')
+
+    # 3. Remove table structures
+    text = re.sub(r'\|[-─=+]+\|', '', text)  # Table row separators
+    text = re.sub(r'^\s*\|.*\|\s*$', '', text, flags=re.MULTILINE)  # Table rows
+
+    # 4. Convert symbols to spoken equivalents
+    symbol_map = {
+        '→': ' leads to ',
+        '←': ' from ',
+        '↔': ' bidirectional ',
+        '✅': 'Yes: ',
+        '❌': 'No: ',
+        '✓': 'check ',
+        '✗': 'x ',
+        '•': ', ',
+        '…': '...',
+        '::': ' ',
+        '>=': ' greater than or equal to ',
+        '<=': ' less than or equal to ',
+        '!=': ' not equal to ',
+        '==': ' equals ',
+        '&&': ' and ',
+        '||': ' or ',
+        '>>': ' ',
+        '<<': ' ',
+        '**': '',
+        '__': '',
+        '//': ' ',
+        '/*': ' ',
+        '*/': ' ',
+        '#{': ' ',
+        '${': ' ',
+        '@{': ' ',
+    }
+    for sym, spoken in symbol_map.items():
+        text = text.replace(sym, spoken)
+
+    # 5. Clean markdown links [text](url) → just text
+    text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+
+    # 6. Remove markdown headers but keep text
+    text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+
+    # 7. Remove emphasis markers
     text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)  # Bold
     text = re.sub(r'\*([^*]+)\*', r'\1', text)  # Italic
-    text = re.sub(r'```[^`]*```', '', text, flags=re.DOTALL)  # Code blocks
-    text = re.sub(r'`([^`]+)`', r'\1', text)  # Inline code
-    text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)  # Horizontal rules
-    text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.MULTILINE)  # Bullet points
-    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)  # Numbered lists
+    text = re.sub(r'__([^_]+)__', r'\1', text)
+    text = re.sub(r'_([^_]+)_', r'\1', text)
 
-    # Clean special characters
+    # 8. Remove horizontal rules and bullet points
+    text = re.sub(r'^---+$', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*[-*]\s+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+
+    # 9. Clean special quote characters
     text = text.replace('"', '"').replace('"', '"')
     text = text.replace(''', "'").replace(''', "'")
     text = text.replace('—', ' - ')
-    text = text.replace('→', 'to')
+    text = text.replace('–', ' - ')
 
-    # Clean up whitespace
+    # 10. Remove file paths and URLs (they sound terrible in TTS)
+    text = re.sub(r'https?://[^\s]+', '', text)
+    text = re.sub(r'[A-Za-z]:\\[^\s]+', '', text)  # Windows paths
+    text = re.sub(r'/[a-zA-Z0-9_/.-]+\.[a-z]+', '', text)  # Unix paths
+
+    # 11. Clean up whitespace
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = re.sub(r'  +', ' ', text)
 
@@ -466,6 +524,78 @@ def get_voice_for_speaker(speaker_name):
     """Get the appropriate voice for a speaker based on gender detection"""
     gender = detect_gender(speaker_name)
     return VOICE_MAP.get(gender, 'alloy')
+
+
+def assign_speaker_voices(speakers):
+    """
+    Assign voices ensuring diversity for 2-speaker podcasts.
+    Forces male/female voice contrast for 2-host shows.
+    """
+    if len(speakers) == 0:
+        return {}
+
+    if len(speakers) == 1:
+        return {speakers[0]: get_voice_for_speaker(speakers[0])}
+
+    if len(speakers) == 2:
+        # Force one male, one female voice for contrast
+        voice1 = get_voice_for_speaker(speakers[0])
+        voice2 = get_voice_for_speaker(speakers[1])
+
+        # If both got same voice, alternate to ensure diversity
+        if voice1 == voice2:
+            if voice1 == 'echo':  # Both detected as male
+                voice2 = 'shimmer'  # Make second female
+            elif voice1 == 'shimmer':  # Both detected as female
+                voice2 = 'echo'  # Make second male
+            else:  # Both neutral/alloy
+                voice1 = 'echo'
+                voice2 = 'shimmer'
+
+        return {speakers[0]: voice1, speakers[1]: voice2}
+
+    # 3+ speakers: use detected genders, but try to ensure variety
+    voices = {}
+    used_voices = set()
+    for speaker in speakers:
+        voice = get_voice_for_speaker(speaker)
+        # Try to avoid duplicates for first 3 speakers
+        if voice in used_voices and len(used_voices) < 3:
+            for alt in ['echo', 'shimmer', 'alloy']:
+                if alt not in used_voices:
+                    voice = alt
+                    break
+        voices[speaker] = voice
+        used_voices.add(voice)
+    return voices
+
+
+def generate_smart_filename(text):
+    """
+    Generate intelligent filename from script content.
+    Extracts episode title, first speaker line, or first words.
+    """
+    # Try episode header first (EPISODE 1: Title, ## Episode 5: Title, etc.)
+    episode_match = re.search(r'(?:##?\s*)?EPISODE\s*\d+[:\s]+(.+?)(?:\n|$)', text, re.IGNORECASE)
+    if episode_match:
+        title = episode_match.group(1).strip()
+    else:
+        # Try first speaker line
+        speaker_match = re.search(r'^[A-Z][A-Za-z]+:\s*(.+?)(?:\.|$)', text, re.MULTILINE)
+        if speaker_match:
+            title = speaker_match.group(1)[:50]
+        else:
+            # Fallback: first N meaningful words
+            words = re.findall(r'\b[a-zA-Z]{3,}\b', text[:300])
+            title = ' '.join(words[:6]) if words else 'podcast'
+
+    # Slugify: lowercase, replace non-alphanumeric with dash, trim
+    slug = re.sub(r'[^a-z0-9]+', '-', title.lower()).strip('-')[:40]
+
+    # Add date for uniqueness
+    date = datetime.now().strftime('%Y%m%d')
+
+    return f"{slug}-{date}.mp3"
 
 
 def split_by_speaker(text, speaker_voices, max_chars=2000):
@@ -1035,28 +1165,28 @@ def generate():
 
             # Auto-expand incomplete episodes if enabled
             if auto_expand:
-                yield f"data: {{\"status\": \"processing\", \"message\": \"Analyzing script for incomplete sections...\"}}\n\n"
+                yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Analyzing script for incomplete sections...\"}}\n\n"
 
                 # Check for incomplete episodes
                 episodes = parse_episodes(text)
                 incomplete_count = sum(1 for ep in episodes if not ep['is_complete'])
 
                 if incomplete_count > 0:
-                    yield f"data: {{\"status\": \"processing\", \"message\": \"Found {incomplete_count} incomplete episode(s). Expanding with AI...\"}}\n\n"
+                    yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Found {incomplete_count} incomplete episode(s). Expanding with AI...\"}}\n\n"
                     logger.info(f"Job {job_id}: Found {incomplete_count} incomplete episodes, expanding...")
 
                     try:
                         # Expand incomplete episodes
                         text, expanded_count = auto_expand_script(text)
-                        yield f"data: {{\"status\": \"processing\", \"message\": \"Expanded {expanded_count} episode(s). Continuing to audio generation...\"}}\n\n"
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Expanded {expanded_count} episode(s). Continuing...\"}}\n\n"
                         logger.info(f"Job {job_id}: Expansion complete, {expanded_count} episodes expanded")
                     except Exception as e:
-                        yield f"data: {{\"status\": \"processing\", \"message\": \"Script expansion failed: {str(e)}. Continuing with original text...\"}}\n\n"
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Script expansion failed: {str(e)}. Continuing with original text...\"}}\n\n"
                         logger.error(f"Job {job_id}: Expansion failed: {e}")
 
             # Run AI Enhancement Pipeline (Perplexity Research + Claude Polish)
             if ai_enhance:
-                yield f"data: {{\"status\": \"processing\", \"message\": \"Starting AI enhancement pipeline...\"}}\n\n"
+                yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Researching topics with Perplexity AI...\"}}\n\n"
                 logger.info(f"Job {job_id}: Starting multi-AI enhancement pipeline")
 
                 try:
@@ -1064,17 +1194,21 @@ def generate():
                         # Note: Can't yield from inside callback, just log
                         logger.info(f"Job {job_id}: {msg}")
 
+                    # Send enhance stage update before running
                     enhanced_text, stats = run_ai_enhancement_pipeline(text, progress_callback)
 
+                    if stats['research_count'] > 0:
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Polishing dialogue with Claude AI...\"}}\n\n"
+
                     if stats['research_count'] > 0 or stats['enhance_count'] > 0:
-                        yield f"data: {{\"status\": \"processing\", \"message\": \"AI pipeline complete: researched {stats['research_count']}, enhanced {stats['enhance_count']} episodes\"}}\n\n"
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"AI pipeline complete: researched {stats['research_count']}, enhanced {stats['enhance_count']} episodes\"}}\n\n"
                         text = enhanced_text
                         logger.info(f"Job {job_id}: Enhancement complete: {stats}")
                     else:
-                        yield f"data: {{\"status\": \"processing\", \"message\": \"AI enhancement skipped (no episodes detected)\"}}\n\n"
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"AI enhancement skipped (no episodes detected)\"}}\n\n"
 
                 except Exception as e:
-                    yield f"data: {{\"status\": \"processing\", \"message\": \"AI enhancement failed: {str(e)}. Continuing without enhancement...\"}}\n\n"
+                    yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"AI enhancement failed: {str(e)}. Continuing without enhancement...\"}}\n\n"
                     logger.error(f"Job {job_id}: Enhancement failed: {e}")
 
             # Preprocess text
@@ -1086,9 +1220,8 @@ def generate():
                 # Detect speakers from the original text (before preprocessing removes the markers)
                 speakers = detect_speakers(text)
                 if speakers:
-                    # Build voice mapping for each speaker
-                    for speaker in speakers:
-                        speaker_voices[speaker] = get_voice_for_speaker(speaker)
+                    # Use assign_speaker_voices for voice diversity (ensures 2-host shows have male+female)
+                    speaker_voices = assign_speaker_voices(speakers)
                     logger.info(f"Job {job_id}: Multi-voice mode: detected {len(speakers)} speakers: {speaker_voices}")
 
             # Split text into chunks
@@ -1109,7 +1242,7 @@ def generate():
                 yield f"data: {{\"status\": \"error\", \"message\": \"Text too long. Maximum {MAX_CHUNKS} chunks allowed.\"}}\n\n"
                 return
 
-            yield f"data: {{\"status\": \"processing\", \"message\": \"Starting generation...\", \"total\": {total_chunks}}}\n\n"
+            yield f"data: {{\"status\": \"processing\", \"stage\": \"generate\", \"message\": \"Starting audio generation...\", \"total\": {total_chunks}}}\n\n"
             logger.info(f"Job {job_id}: Starting TTS generation: {total_chunks} chunks, model={model}, mode={mode_desc}")
 
             # Get OpenAI client
@@ -1166,20 +1299,22 @@ def generate():
                 results[idx] = path
                 speaker_info = f" [{chunk_speaker}:{chunk_voice}]" if chunk_speaker else f" [{chunk_voice}]"
                 logger.debug(f"Job {job_id}: Chunk {idx+1} done{speaker_info} ({path.stat().st_size} bytes) [{completed}/{total_chunks}]")
-                yield f"data: {{\"status\": \"processing\", \"message\": \"Completed {completed}/{total_chunks} chunks ({pool_size} agents)\", \"current\": {completed}, \"total\": {total_chunks}}}\n\n"
+                yield f"data: {{\"status\": \"processing\", \"stage\": \"generate\", \"message\": \"Generating audio... {completed}/{total_chunks}\", \"current\": {completed}, \"total\": {total_chunks}}}\n\n"
 
             # Get chunk files in correct order for concatenation
             chunk_files = [results[i] for i in sorted(results.keys())]
 
             # Concatenate chunks
-            yield f"data: {{\"status\": \"processing\", \"message\": \"Combining audio chunks...\", \"current\": {total_chunks}, \"total\": {total_chunks}}}\n\n"
+            yield f"data: {{\"status\": \"processing\", \"stage\": \"combine\", \"message\": \"Combining audio chunks...\", \"current\": {total_chunks}, \"total\": {total_chunks}}}\n\n"
 
             output_path = job_dir / "podcast.mp3"
             concatenate_mp3_files(chunk_files, output_path)
 
             if output_path.exists():
                 size_mb = output_path.stat().st_size / (1024 * 1024)
-                yield f"data: {{\"status\": \"complete\", \"message\": \"Audio generated successfully!\", \"download_id\": \"{job_id}\", \"size_mb\": {size_mb:.1f}}}\n\n"
+                # Generate smart filename based on content
+                smart_filename = generate_smart_filename(text)
+                yield f"data: {{\"status\": \"complete\", \"stage\": \"combine\", \"message\": \"Audio generated successfully!\", \"download_id\": \"{job_id}\", \"size_mb\": {size_mb:.1f}, \"filename\": \"{smart_filename}\"}}\n\n"
             else:
                 yield f"data: {{\"status\": \"error\", \"message\": \"Failed to create final audio file\"}}\n\n"
 

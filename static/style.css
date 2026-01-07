@@ -448,3 +448,264 @@ footer {
 .ai-enhance-section .checkbox-label input[type="checkbox"] {
     accent-color: #8b5cf6;
 }
+
+/* ======================================
+   Pipeline Visualization Styles
+   ====================================== */
+
+.pipeline-container {
+    position: relative;
+    width: 100%;
+    height: 450px;
+    border-radius: 1rem;
+    overflow: hidden;
+    background: #0a0a14;
+}
+
+#pipeline-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1;
+}
+
+/* Glassmorphism overlay */
+.pipeline-overlay {
+    position: relative;
+    z-index: 2;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 1.5rem;
+}
+
+/* Stage Indicators */
+.stage-indicators {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(10px);
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.5rem;
+    transition: all 0.3s ease;
+    opacity: 0.4;
+}
+
+.stage.active {
+    opacity: 1;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.stage.completed {
+    opacity: 0.8;
+}
+
+.stage.completed .stage-icon {
+    filter: saturate(0.5);
+}
+
+.stage-icon {
+    font-size: 1.5rem;
+    transition: transform 0.3s ease;
+}
+
+.stage.active .stage-icon {
+    animation: pulse-icon 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-icon {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+}
+
+.stage-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #a1a1aa;
+    white-space: nowrap;
+}
+
+.stage.active .stage-label {
+    color: #fff;
+}
+
+/* Stage Connectors */
+.stage-connector {
+    width: 30px;
+    height: 2px;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 1px;
+    position: relative;
+    overflow: hidden;
+}
+
+.stage-connector.active::after,
+.stage-connector.completed::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    border-radius: 1px;
+}
+
+.stage-connector.completed::after {
+    width: 100%;
+}
+
+.stage-connector.active::after {
+    width: 50%;
+    animation: connector-pulse 1s ease-in-out infinite;
+}
+
+@keyframes connector-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+/* Progress Content */
+.progress-content {
+    text-align: center;
+    padding: 2rem;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(15px);
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+#stage-title {
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+#progress-message {
+    color: #a1a1aa;
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+/* Chunk Progress Bar */
+#chunk-progress {
+    margin-top: 1rem;
+}
+
+.chunk-bar {
+    width: 100%;
+    max-width: 400px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 0 auto 0.5rem;
+}
+
+.chunk-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #16a34a);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+    width: 0%;
+    box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);
+}
+
+#chunk-count {
+    font-size: 0.875rem;
+    color: #71717a;
+}
+
+/* Result filename styling */
+.result-filename {
+    font-family: monospace;
+    font-size: 0.9rem;
+    color: #a1a1aa;
+    background: rgba(0, 0, 0, 0.3);
+    padding: 0.5rem 1rem;
+    border-radius: 0.25rem;
+    margin-bottom: 0.5rem;
+    display: inline-block;
+}
+
+/* Stage-specific active colors */
+.stage[data-stage="analyze"].active {
+    background: rgba(0, 212, 255, 0.2);
+    box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+}
+
+.stage[data-stage="research"].active {
+    background: rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+.stage[data-stage="enhance"].active {
+    background: rgba(139, 92, 246, 0.2);
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+}
+
+.stage[data-stage="generate"].active {
+    background: rgba(34, 197, 94, 0.2);
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.3);
+}
+
+.stage[data-stage="combine"].active {
+    background: rgba(245, 158, 11, 0.2);
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.3);
+}
+
+/* Mobile responsive */
+@media (max-width: 600px) {
+    .pipeline-container {
+        height: 400px;
+    }
+
+    .stage-indicators {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+
+    .stage-connector {
+        display: none;
+    }
+
+    .stage {
+        padding: 0.4rem 0.5rem;
+    }
+
+    .stage-icon {
+        font-size: 1.2rem;
+    }
+
+    .stage-label {
+        font-size: 0.6rem;
+    }
+
+    #stage-title {
+        font-size: 1.4rem;
+    }
+
+    .progress-content {
+        padding: 1.5rem 1rem;
+    }
+}

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Podcast TTS Generator</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <script src="{{ url_for('static', filename='pipeline.js') }}" defer></script>
 </head>
 <body>
     <div class="container">
@@ -110,20 +111,61 @@
             </form>
 
             <div id="progress-section" class="hidden">
-                <div class="progress-header">
-                    <span id="progress-message">Starting...</span>
-                </div>
-                <div class="progress-bar">
-                    <div class="progress-fill" id="progress-fill"></div>
-                </div>
-                <div class="progress-stats">
-                    <span id="progress-chunks">Chunk 0 of 0</span>
+                <!-- Pipeline Canvas Background -->
+                <div class="pipeline-container">
+                    <canvas id="pipeline-canvas"></canvas>
+
+                    <!-- Glassmorphism Overlay -->
+                    <div class="pipeline-overlay">
+                        <!-- Stage Indicator Bar -->
+                        <div class="stage-indicators">
+                            <div class="stage" data-stage="analyze">
+                                <div class="stage-icon">📄</div>
+                                <div class="stage-label">Analyze</div>
+                            </div>
+                            <div class="stage-connector"></div>
+                            <div class="stage" data-stage="research">
+                                <div class="stage-icon">🔍</div>
+                                <div class="stage-label">Research</div>
+                            </div>
+                            <div class="stage-connector"></div>
+                            <div class="stage" data-stage="enhance">
+                                <div class="stage-icon">🧠</div>
+                                <div class="stage-label">Enhance</div>
+                            </div>
+                            <div class="stage-connector"></div>
+                            <div class="stage" data-stage="generate">
+                                <div class="stage-icon">🎙️</div>
+                                <div class="stage-label">Generate</div>
+                            </div>
+                            <div class="stage-connector"></div>
+                            <div class="stage" data-stage="combine">
+                                <div class="stage-icon">✨</div>
+                                <div class="stage-label">Complete</div>
+                            </div>
+                        </div>
+
+                        <!-- Current Status -->
+                        <div class="progress-content">
+                            <h2 id="stage-title">Initializing...</h2>
+                            <p id="progress-message">Starting pipeline...</p>
+
+                            <!-- Chunk Progress (for TTS stage) -->
+                            <div id="chunk-progress">
+                                <div class="chunk-bar">
+                                    <div class="chunk-fill" id="chunk-fill"></div>
+                                </div>
+                                <span id="chunk-count">0 / 0 chunks</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
             <div id="result-section" class="hidden">
                 <div class="success-icon">&#10003;</div>
                 <h2>Audio Generated!</h2>
+                <p id="result-filename" class="result-filename"></p>
                 <p id="result-size">Size: 0 MB</p>
                 <a id="download-link" class="download-btn" href="#">
                     Download MP3
@@ -152,11 +194,12 @@
         const resultSection = document.getElementById('result-section');
         const errorSection = document.getElementById('error-section');
         const progressMessage = document.getElementById('progress-message');
-        const progressFill = document.getElementById('progress-fill');
-        const progressChunks = document.getElementById('progress-chunks');
+        const chunkFill = document.getElementById('chunk-fill');
+        const chunkCount = document.getElementById('chunk-count');
         const downloadLink = document.getElementById('download-link');
         const resultSize = document.getElementById('result-size');
         const errorMessage = document.getElementById('error-message');
+        const resultFilename = document.getElementById('result-filename');
 
         // File input label update
         fileInput.addEventListener('change', function() {
@@ -181,11 +224,17 @@
                 return;
             }
 
-            // Show progress
+            // Show progress and start pipeline animation
             form.classList.add('hidden');
             progressSection.classList.remove('hidden');
             resultSection.classList.add('hidden');
             errorSection.classList.add('hidden');
+
+            // Initialize and start pipeline visualization
+            if (typeof initPipeline === 'function') {
+                initPipeline();
+                startPipeline('analyze');
+            }
 
             const formData = new FormData(form);
 
@@ -224,16 +273,41 @@
         function handleProgress(data) {
             if (data.status === 'processing') {
                 progressMessage.textContent = data.message;
-                if (data.total) {
+
+                // Update pipeline stage if provided
+                if (data.stage && typeof updatePipelineStage === 'function') {
+                    let progress = 0;
+                    if (data.total && data.current) {
+                        progress = data.current / data.total;
+                    }
+                    updatePipelineStage(data.stage, progress);
+                }
+
+                // Update chunk progress for generate stage
+                if (data.total && data.current) {
                     const percent = (data.current / data.total) * 100;
-                    progressFill.style.width = percent + '%';
-                    progressChunks.textContent = `Chunk ${data.current} of ${data.total}`;
+                    chunkFill.style.width = percent + '%';
+                    chunkCount.textContent = `${data.current} / ${data.total} chunks`;
                 }
             } else if (data.status === 'complete') {
+                // Stop pipeline animation
+                if (typeof stopPipeline === 'function') {
+                    stopPipeline();
+                }
+
                 progressSection.classList.add('hidden');
                 resultSection.classList.remove('hidden');
                 resultSize.textContent = `Size: ${data.size_mb} MB`;
+
+                // Use smart filename if provided
+                if (data.filename && resultFilename) {
+                    resultFilename.textContent = data.filename;
+                }
+
                 downloadLink.href = `/download/${data.download_id}`;
+                if (data.filename) {
+                    downloadLink.download = data.filename;
+                }
                 downloadLink.onclick = function() {
                     // Cleanup after download starts
                     setTimeout(() => {
@@ -246,6 +320,11 @@
         }
 
         function showError(message) {
+            // Stop pipeline animation
+            if (typeof stopPipeline === 'function') {
+                stopPipeline();
+            }
+
             progressSection.classList.add('hidden');
             resultSection.classList.add('hidden');
             errorSection.classList.remove('hidden');
@@ -257,7 +336,8 @@
             progressSection.classList.add('hidden');
             resultSection.classList.add('hidden');
             errorSection.classList.add('hidden');
-            progressFill.style.width = '0%';
+            chunkFill.style.width = '0%';
+            chunkCount.textContent = '0 / 0 chunks';
             generateBtn.disabled = false;
         }
     </script>
