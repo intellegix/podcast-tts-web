@@ -20,6 +20,8 @@ from collections import deque
 from flask import Flask, render_template, request, jsonify, send_file, Response, session, redirect, url_for
 
 from openai import OpenAI
+import anthropic
+import requests
 import httpx
 import sys
 import gevent
@@ -28,8 +30,10 @@ from gevent.pool import Pool as GeventPool
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24).hex())
 
-# Configuration
+# Configuration - API keys must be set via environment variables
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY')
+CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY')
+PERPLEXITY_API_KEY = os.environ.get('PERPLEXITY_API_KEY')
 APP_PASSWORD = os.environ.get('PASSWORD', '')
 TEMP_DIR = Path(tempfile.gettempdir()) / 'podcast-tts'
 TEMP_DIR.mkdir(exist_ok=True)
@@ -90,6 +94,42 @@ OUTPUT: Return ONLY the expanded dialogue script, no explanations or meta-commen
 
 # Script expansion model
 SCRIPT_EXPANSION_MODEL = os.environ.get('SCRIPT_EXPANSION_MODEL', 'gpt-4o')
+
+# Claude enhancement prompt for natural, engaging dialogue
+CLAUDE_ENHANCEMENT_PROMPT = """You are an expert podcast script editor. Your job is to polish dialogue for maximum listener engagement while preserving all content and meaning.
+
+ENHANCEMENT RULES:
+1. NATURAL FLOW: Make dialogue sound like real conversation, not scripted. Add filler words sparingly ("you know", "I mean", "right?")
+2. PACING: Vary sentence length. Short punchy lines. Then longer explanatory ones. Create rhythm.
+3. PERSONALITY: Add speaker quirks, callbacks to earlier points, genuine reactions like "That's fascinating" or "Wait, really?"
+4. ENTERTAINMENT: Include subtle humor, relatable analogies, storytelling moments
+5. TTS OPTIMIZATION (CRITICAL):
+   - Write ALL numbers as words (fifty-eight thousand, not 58,000)
+   - Spell out abbreviations on first use (Purchase Order, or P O, not PO)
+   - Add natural pauses with punctuation (commas, ellipses, dashes)
+   - Avoid tongue-twisters and awkward consonant clusters
+   - Use contractions naturally (don't, won't, can't)
+6. EMOTIONAL BEATS: Add moments of excitement, surprise, reflection
+7. LISTENER HOOKS: Tease upcoming content, create curiosity gaps
+
+PRESERVE:
+- All factual information and technical details
+- Speaker names (ALEX:, SARAH:, etc.)
+- The overall structure and episode flow
+- Any specific numbers, dates, or statistics (but write them as words)
+
+OUTPUT: Return the enhanced script only. No explanations or meta-commentary."""
+
+# Perplexity research prompt for factual accuracy
+PERPLEXITY_RESEARCH_PROMPT = """You are a research assistant helping create accurate podcast content.
+Research the given topic and provide:
+1. Current, accurate statistics and facts
+2. Recent developments or news (within last 6 months if relevant)
+3. Specific examples and case studies
+4. Industry terminology explained clearly
+
+Format your response as bullet points that can be easily incorporated into a podcast script.
+Be concise but thorough. Cite sources when possible."""
 
 
 class RateLimiter:
@@ -495,6 +535,201 @@ def auto_expand_script(text, progress_callback=None):
     return '\n\n'.join(result_parts), len(incomplete)
 
 
+# ============== Multi-AI Enhancement Pipeline ==============
+
+def get_claude_client():
+    """Get Anthropic Claude client"""
+    if not CLAUDE_API_KEY:
+        raise ValueError("CLAUDE_API_KEY not configured")
+    return anthropic.Anthropic(api_key=CLAUDE_API_KEY)
+
+
+def research_episode_with_perplexity(episode_data):
+    """
+    Research a single episode topic using Perplexity API.
+    Called in parallel for each episode.
+    """
+    episode_num = episode_data.get('episode_num', 0)
+    episode_text = episode_data.get('text', '')
+    header = episode_data.get('header', '')
+
+    # Extract the main topic from the episode header/content
+    topic = header if header else episode_text[:500]
+
+    try:
+        response = requests.post(
+            "https://api.perplexity.ai/chat/completions",
+            headers={
+                "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "llama-3.1-sonar-large-128k-online",
+                "messages": [
+                    {"role": "system", "content": PERPLEXITY_RESEARCH_PROMPT},
+                    {"role": "user", "content": f"Research this podcast episode topic:\n\n{topic}\n\nProvide relevant facts, statistics, and current information."}
+                ],
+                "temperature": 0.3,
+                "max_tokens": 1000
+            },
+            timeout=60
+        )
+
+        if response.status_code == 200:
+            research_data = response.json()['choices'][0]['message']['content']
+            print(f"[RESEARCH] Episode {episode_num} researched successfully", file=sys.stderr, flush=True)
+            return {
+                'episode_num': episode_num,
+                'research': research_data,
+                'success': True
+            }
+        else:
+            print(f"[RESEARCH] Episode {episode_num} failed: {response.status_code}", file=sys.stderr, flush=True)
+            return {'episode_num': episode_num, 'research': '', 'success': False}
+
+    except Exception as e:
+        print(f"[RESEARCH] Episode {episode_num} error: {e}", file=sys.stderr, flush=True)
+        return {'episode_num': episode_num, 'research': '', 'success': False}
+
+
+def enhance_episode_with_claude(episode_data):
+    """
+    Enhance a single episode using Claude for natural dialogue.
+    Called in parallel for each episode.
+    """
+    episode_num = episode_data.get('episode_num', 0)
+    episode_text = episode_data.get('text', '')
+    speakers = episode_data.get('speakers', [])
+
+    try:
+        client = get_claude_client()
+
+        speaker_list = ', '.join(speakers) if speakers else 'ALEX, SARAH'
+
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=8000,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"{CLAUDE_ENHANCEMENT_PROMPT}\n\nSPEAKERS: {speaker_list}\n\nEPISODE TO ENHANCE:\n{episode_text}"
+                }
+            ]
+        )
+
+        enhanced_text = response.content[0].text
+        print(f"[CLAUDE] Episode {episode_num} enhanced ({len(enhanced_text)} chars)", file=sys.stderr, flush=True)
+
+        return {
+            'episode_num': episode_num,
+            'enhanced_text': enhanced_text,
+            'success': True
+        }
+
+    except Exception as e:
+        print(f"[CLAUDE] Episode {episode_num} error: {e}", file=sys.stderr, flush=True)
+        return {
+            'episode_num': episode_num,
+            'enhanced_text': episode_text,  # Return original on failure
+            'success': False
+        }
+
+
+def run_ai_enhancement_pipeline(text, progress_callback=None):
+    """
+    Run the full multi-AI enhancement pipeline with parallel agents.
+
+    Pipeline stages:
+    1. Perplexity Research (parallel per episode)
+    2. GPT-4o Expansion (parallel per incomplete episode) - already called separately
+    3. Claude Enhancement (parallel per episode)
+
+    Returns: (enhanced_text, stats_dict)
+    """
+    episodes = parse_episodes(text)
+    total_episodes = len(episodes)
+
+    if total_episodes == 0:
+        return text, {'research_count': 0, 'enhance_count': 0}
+
+    # Extract speakers for consistency
+    speakers = detect_speakers(text)
+    if not speakers:
+        speakers = ['ALEX', 'SARAH']
+
+    stats = {'research_count': 0, 'enhance_count': 0}
+
+    # Stage 1: Perplexity Research - PARALLEL
+    if progress_callback:
+        progress_callback(f"Researching {total_episodes} episodes with Perplexity ({total_episodes} parallel agents)...")
+
+    print(f"[PIPELINE] Starting Perplexity research for {total_episodes} episodes", file=sys.stderr, flush=True)
+
+    research_pool = GeventPool(size=total_episodes)
+    research_results = list(research_pool.imap_unordered(
+        research_episode_with_perplexity,
+        episodes
+    ))
+
+    # Build research context map
+    research_map = {}
+    for result in research_results:
+        if result['success']:
+            research_map[result['episode_num']] = result['research']
+            stats['research_count'] += 1
+
+    print(f"[PIPELINE] Research complete: {stats['research_count']}/{total_episodes} successful", file=sys.stderr, flush=True)
+
+    # Inject research into episodes
+    for ep in episodes:
+        ep_num = ep['episode_num']
+        if ep_num in research_map:
+            # Add research context to episode text
+            research_context = f"\n\n[RESEARCH CONTEXT]\n{research_map[ep_num]}\n[END RESEARCH]\n\n"
+            ep['text'] = ep['text'] + research_context
+
+    # Stage 2: Claude Enhancement - PARALLEL
+    if progress_callback:
+        progress_callback(f"Enhancing {total_episodes} episodes with Claude ({total_episodes} parallel agents)...")
+
+    print(f"[PIPELINE] Starting Claude enhancement for {total_episodes} episodes", file=sys.stderr, flush=True)
+
+    # Prepare episode data with speakers
+    for ep in episodes:
+        ep['speakers'] = speakers
+
+    enhance_pool = GeventPool(size=total_episodes)
+    enhance_results = list(enhance_pool.imap_unordered(
+        enhance_episode_with_claude,
+        episodes
+    ))
+
+    # Build enhanced text map
+    enhanced_map = {}
+    for result in enhance_results:
+        enhanced_map[result['episode_num']] = result['enhanced_text']
+        if result['success']:
+            stats['enhance_count'] += 1
+
+    print(f"[PIPELINE] Enhancement complete: {stats['enhance_count']}/{total_episodes} successful", file=sys.stderr, flush=True)
+
+    # Rebuild full script with enhanced episodes (in order)
+    result_parts = []
+    for ep in sorted(episodes, key=lambda x: x['episode_num']):
+        ep_num = ep['episode_num']
+        if ep_num in enhanced_map:
+            result_parts.append(enhanced_map[ep_num])
+        else:
+            result_parts.append(ep['text'])
+
+    enhanced_script = '\n\n'.join(result_parts)
+
+    if progress_callback:
+        progress_callback(f"AI enhancement complete! Researched {stats['research_count']}, enhanced {stats['enhance_count']} episodes.")
+
+    return enhanced_script, stats
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     """Login page"""
@@ -541,8 +776,9 @@ def generate():
     model = request.form.get('model', 'tts-1-hd')
     multi_voice = request.form.get('multi_voice', 'false').lower() == 'true'
     auto_expand = request.form.get('auto_expand', 'true').lower() == 'true'  # Default ON
+    ai_enhance = request.form.get('ai_enhance', 'true').lower() == 'true'  # Default ON
 
-    def generate_stream(text, voice, model, multi_voice, auto_expand):
+    def generate_stream(text, voice, model, multi_voice, auto_expand, ai_enhance):
         job_id = str(uuid.uuid4())[:8]
         job_dir = TEMP_DIR / job_id
         job_dir.mkdir(exist_ok=True)
@@ -577,6 +813,29 @@ def generate():
                     except Exception as e:
                         yield f"data: {{\"status\": \"processing\", \"message\": \"Script expansion failed: {str(e)}. Continuing with original text...\"}}\n\n"
                         print(f"[EXPAND] Expansion failed: {e}", file=sys.stderr, flush=True)
+
+            # Run AI Enhancement Pipeline (Perplexity Research + Claude Polish)
+            if ai_enhance:
+                yield f"data: {{\"status\": \"processing\", \"message\": \"Starting AI enhancement pipeline...\"}}\n\n"
+                print(f"[PIPELINE] Starting multi-AI enhancement pipeline", file=sys.stderr, flush=True)
+
+                try:
+                    def progress_callback(msg):
+                        # Note: Can't yield from inside callback, just log
+                        print(f"[PIPELINE] {msg}", file=sys.stderr, flush=True)
+
+                    enhanced_text, stats = run_ai_enhancement_pipeline(text, progress_callback)
+
+                    if stats['research_count'] > 0 or stats['enhance_count'] > 0:
+                        yield f"data: {{\"status\": \"processing\", \"message\": \"AI pipeline complete: researched {stats['research_count']}, enhanced {stats['enhance_count']} episodes\"}}\n\n"
+                        text = enhanced_text
+                        print(f"[PIPELINE] Enhancement complete: {stats}", file=sys.stderr, flush=True)
+                    else:
+                        yield f"data: {{\"status\": \"processing\", \"message\": \"AI enhancement skipped (no episodes detected)\"}}\n\n"
+
+                except Exception as e:
+                    yield f"data: {{\"status\": \"processing\", \"message\": \"AI enhancement failed: {str(e)}. Continuing without enhancement...\"}}\n\n"
+                    print(f"[PIPELINE] Enhancement failed: {e}", file=sys.stderr, flush=True)
 
             # Preprocess text
             processed = preprocess_text(text)
@@ -681,7 +940,7 @@ def generate():
         except Exception as e:
             yield f"data: {json.dumps({'status': 'error', 'message': f'Error: {str(e)}'})}\n\n"
 
-    response = Response(generate_stream(text, voice, model, multi_voice, auto_expand), mimetype='text/event-stream')
+    response = Response(generate_stream(text, voice, model, multi_voice, auto_expand, ai_enhance), mimetype='text/event-stream')
     response.headers['Cache-Control'] = 'no-cache'
     response.headers['Connection'] = 'keep-alive'
     response.headers['X-Accel-Buffering'] = 'no'  # Critical for Render's nginx proxy

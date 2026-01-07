@@ -438,3 +438,13 @@ footer {
 .auto-expand-section .checkbox-label input[type="checkbox"] {
     accent-color: #22c55e;
 }
+
+/* AI Enhancement pipeline section styling */
+.ai-enhance-section {
+    background: linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(236, 72, 153, 0.15) 100%);
+    border-color: rgba(139, 92, 246, 0.4);
+}
+
+.ai-enhance-section .checkbox-label input[type="checkbox"] {
+    accent-color: #8b5cf6;
+}
