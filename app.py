@@ -1197,8 +1197,8 @@ def generate():
 @login_required
 def download(job_id):
     """Download generated audio file"""
-    # Sanitize job_id to prevent path traversal
-    job_id = re.sub(r'[^a-zA-Z0-9-]', '', job_id)
+    # Sanitize job_id to prevent path traversal (allow alphanumeric, dash, underscore)
+    job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
 
     output_path = TEMP_DIR / job_id / "podcast.mp3"
 
@@ -1216,7 +1216,7 @@ def download(job_id):
 @app.route('/cleanup/<job_id>', methods=['POST'])
 def cleanup(job_id):
     """Clean up temporary files after download"""
-    job_id = re.sub(r'[^a-zA-Z0-9-]', '', job_id)
+    job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
     job_dir = TEMP_DIR / job_id
 
     if job_dir.exists():
