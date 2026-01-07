@@ -771,7 +771,7 @@ def research_episode_with_perplexity(episode_data):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "llama-3.1-sonar-large-128k-online",
+                "model": "sonar-pro",  # Updated model name (was llama-3.1-sonar-large-128k-online)
                 "messages": [
                     {"role": "system", "content": PERPLEXITY_RESEARCH_PROMPT},
                     {"role": "user", "content": f"Research this podcast episode topic:\n\n{topic}\n\nProvide relevant facts, statistics, and current information."}
