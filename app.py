@@ -991,11 +991,13 @@ def enhance_episode_with_claude(episode_data):
     # Check if Claude is configured
     client = get_claude_client()
     if not client:
+        logger.warning(f"Episode {episode_num}: Claude API not configured, skipping enhancement")
         return {
             'episode_num': episode_num,
             'enhanced_text': episode_text,  # Return original if no Claude
             'changes': None,
-            'success': False
+            'success': False,
+            'error': 'Claude API not configured'
         }
 
     try:
@@ -1360,6 +1362,7 @@ def generate():
                             # Enhance this episode
                             result = enhance_episode_with_claude(ep)
                             enhanced_map[ep_num] = result['enhanced_text']
+                            logger.info(f"Job {job_id}: Episode {ep_num} enhance result - success={result['success']}, has_changes={result.get('changes') is not None}")
 
                             if result['success'] and result.get('changes'):
                                 changes = result['changes']
@@ -1373,18 +1376,21 @@ def generate():
 
                                 # Send update with changes
                                 yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: +{changes['words_added']} words added\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+                            elif result.get('error'):
+                                # Claude not configured or error occurred
+                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: {result['error']}\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
 
-                        # Send enhancement complete with all changes
-                        if all_changes:
-                            total_words_added = sum(c['words_added'] for c in all_changes)
-                            enhance_data = {
-                                'status': 'processing',
-                                'stage': 'enhance',
-                                'message': f"Enhancement complete: +{total_words_added} words across {len(all_changes)} episodes",
-                                'changes': all_changes,
-                                'total_citations': len(all_citations)
-                            }
-                            yield f"data: {json.dumps(enhance_data)}\n\n"
+                        # Send enhancement complete with all changes (always send, even if empty)
+                        total_words_added = sum(c['words_added'] for c in all_changes) if all_changes else 0
+                        enhance_data = {
+                            'status': 'processing',
+                            'stage': 'enhance',
+                            'message': f"Enhancement complete: +{total_words_added} words across {len(all_changes)} episodes",
+                            'changes': all_changes,
+                            'total_citations': len(all_citations)
+                        }
+                        logger.info(f"Job {job_id}: Sending changes data: {len(all_changes)} changes")
+                        yield f"data: {json.dumps(enhance_data)}\n\n"
 
                         # Rebuild full script with enhanced episodes
                         result_parts = []
