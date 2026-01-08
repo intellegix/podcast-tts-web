@@ -230,31 +230,56 @@ scheduler.start()
 logger.info("Background scheduler started: cleanup (1h), keep-alive (14m)")
 atexit.register(lambda: scheduler.shutdown(wait=False))
 
-# Script expansion prompt for GPT-4o
-SCRIPT_EXPANSION_PROMPT = """You are a podcast script writer. Expand the given outline into natural dialogue between the hosts.
+# Script expansion prompt for GPT-4o - Always creates two-person conversational podcast
+SCRIPT_EXPANSION_PROMPT = """You are an expert podcast scriptwriter creating entertaining, engaging two-person dialogue.
+
+SPEAKER REQUIREMENTS (STRICT):
+- Create EXACTLY two speakers in every episode:
+  - ALEX: The host/interviewer - introduces topics, asks thought-provoking questions, keeps conversation flowing
+  - SARAH: The expert/analyst - provides detailed insights, data, examples, and expert commentary
+- Use speaker names followed by colon (ALEX:, SARAH:)
+- NEVER use any other speaker names - ONLY ALEX and SARAH
+
+DIALOGUE STYLE:
+- Create natural back-and-forth conversation (NOT monologues)
+- Each speaker turn should be 1-4 sentences, then switch speakers
+- ALEX asks questions, reacts with interest, provides transitions
+- SARAH explains, provides examples, shares insights
+- Include natural reactions: "That's fascinating!", "Great point!", "Let me add to that..."
+- Add light humor and personality where appropriate
+- Make it sound like a real conversation between friends who are experts
+
+CONTENT REQUIREMENTS:
+- Expand the outline into detailed, informative content
+- Include specific facts, statistics, and examples from the outline
+- Make technical content accessible and engaging
+- Aim for 800-1200 words per episode section
 
 FORMAT RULES:
-- Use speaker names followed by colon (ALEX:, SARAH:, etc.) - match the names used in the context
-- Write natural, conversational dialogue with back-and-forth between hosts
-- The first speaker is typically the host/interviewer, the second is the expert/guest
-- Match the tone, style, and technical depth of the provided context
 - Do NOT include stage directions in parentheses like (laughs) or (pauses)
-- Aim for 800-1200 words per episode section
-- Include specific examples, numbers, and details from the outline
-- Make it educational but engaging - explain concepts clearly
+- Do NOT use headers or bullet points - just dialogue
+- Start each line with speaker name: ALEX: or SARAH:
 
-OUTPUT: Return ONLY the expanded dialogue script, no explanations or meta-commentary."""
+OUTPUT: Return ONLY the expanded dialogue script with ALEX and SARAH speakers, no explanations."""
 
 # Script expansion model
 SCRIPT_EXPANSION_MODEL = os.environ.get('SCRIPT_EXPANSION_MODEL', 'gpt-4o')
 
-# Claude enhancement prompt for natural, engaging dialogue
+# Claude enhancement prompt for natural, engaging two-person dialogue
 CLAUDE_ENHANCEMENT_PROMPT = """You are an expert podcast script editor. Your job is to polish dialogue for maximum listener engagement while preserving all content and meaning.
+
+TWO-PERSON DIALOGUE BALANCE:
+- Ensure natural back-and-forth between ALEX and SARAH
+- ALEX asks questions, provides transitions, reacts with interest
+- SARAH provides expert insights, examples, detailed explanations
+- Neither speaker should dominate - aim for 40-60% balance
+- Each speaker turn should be 1-4 sentences before switching
+- Add engaging reactions: "That's fascinating!", "Great point!", "Tell me more about that..."
 
 ENHANCEMENT RULES:
 1. NATURAL FLOW: Make dialogue sound like real conversation, not scripted. Add filler words sparingly ("you know", "I mean", "right?")
 2. PACING: Vary sentence length. Short punchy lines. Then longer explanatory ones. Create rhythm.
-3. PERSONALITY: Add speaker quirks, callbacks to earlier points, genuine reactions like "That's fascinating" or "Wait, really?"
+3. PERSONALITY: Add speaker quirks, callbacks to earlier points, genuine reactions
 4. ENTERTAINMENT: Include subtle humor, relatable analogies, storytelling moments
 5. TTS OPTIMIZATION (CRITICAL):
    - Write ALL numbers as words (fifty-eight thousand, not 58,000)
@@ -267,7 +292,7 @@ ENHANCEMENT RULES:
 
 PRESERVE:
 - All factual information and technical details
-- Speaker names (ALEX:, SARAH:, etc.)
+- Speaker names (ALEX: and SARAH: only)
 - The overall structure and episode flow
 - Any specific numbers, dates, or statistics (but write them as words)
 
@@ -931,21 +956,21 @@ def parse_episodes(text):
 def expand_script_with_ai(outline_text, context="", speakers=None):
     """
     Use GPT-4o to expand an episode outline into full podcast dialogue.
+    Always uses ALEX (male host) and SARAH (female expert) for conversational format.
 
     Args:
         outline_text: The incomplete episode outline
         context: Text from previous complete episodes for style matching
-        speakers: List of speaker names to use (e.g., ['ALEX', 'SARAH'])
+        speakers: Ignored - always uses ALEX and SARAH for consistency
 
     Returns:
-        Expanded dialogue script
+        Expanded dialogue script with ALEX and SARAH speakers
     """
     client = get_client()
 
-    # Build the user prompt
-    speaker_info = ""
-    if speakers:
-        speaker_info = f"\nSpeakers to use: {', '.join(speakers)}"
+    # Always force two-person format with ALEX and SARAH
+    speakers = ['ALEX', 'SARAH']
+    speaker_info = f"\nSpeakers: ALEX (male host/interviewer) and SARAH (female expert/analyst)"
 
     context_snippet = ""
     if context:
@@ -1455,6 +1480,11 @@ def generate():
     auto_expand = request.form.get('auto_expand', 'true').lower() == 'true'  # Default ON
     ai_enhance = request.form.get('ai_enhance', 'true').lower() == 'true'  # Default ON
 
+    # Auto-enable multi-voice for two-person conversational podcasts when auto-expand is on
+    if auto_expand and not multi_voice:
+        multi_voice = True
+        logger.info("Auto-enabling multi-voice for two-person podcast format")
+
     def generate_stream(text, voice, model, multi_voice, auto_expand, ai_enhance):
         job_id = generate_job_id()  # Collision-proof job ID
         job_dir = TEMP_DIR / job_id
@@ -1676,6 +1706,7 @@ def generate():
                 with open(transcript_path, 'w', encoding='utf-8') as f:
                     f.write(f"# Podcast Transcript\n")
                     f.write(f"# Generated: {datetime.now().isoformat()}\n")
+                    f.write(f"# Hosts: ALEX (male host) and SARAH (female expert)\n")
                     f.write(f"# Job ID: {job_id}\n\n")
                     f.write(text)  # Save the enhanced/expanded script
                 logger.info(f"Job {job_id}: Transcript saved ({len(text)} chars)")
