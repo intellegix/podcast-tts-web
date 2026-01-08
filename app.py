@@ -1042,12 +1042,14 @@ def enhance_episode_with_claude(episode_data):
         }
 
     except Exception as e:
-        logger.error(f"Episode {episode_num} enhancement error: {e}")
+        error_str = str(e)
+        logger.error(f"Episode {episode_num} enhancement error: {error_str}")
         return {
             'episode_num': episode_num,
             'enhanced_text': episode_text,  # Return original on failure
             'changes': None,
-            'success': False
+            'success': False,
+            'error': f"Claude API error: {error_str[:100]}"  # Include actual error
         }
 
 
@@ -1362,7 +1364,7 @@ def generate():
                             # Enhance this episode
                             result = enhance_episode_with_claude(ep)
                             enhanced_map[ep_num] = result['enhanced_text']
-                            logger.info(f"Job {job_id}: Episode {ep_num} enhance result - success={result['success']}, has_changes={result.get('changes') is not None}")
+                            logger.info(f"Job {job_id}: Episode {ep_num} enhance result - success={result['success']}, has_changes={result.get('changes') is not None}, error={result.get('error')}")
 
                             if result['success'] and result.get('changes'):
                                 changes = result['changes']
@@ -1377,8 +1379,14 @@ def generate():
                                 # Send update with changes
                                 yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: +{changes['words_added']} words added\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
                             elif result.get('error'):
-                                # Claude not configured or error occurred
-                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: {result['error']}\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+                                # Claude not configured or error occurred - show specific error in UI
+                                error_msg = result.get('error', 'Unknown error')
+                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: ⚠️ {error_msg}\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+                                logger.warning(f"Job {job_id}: Episode {ep_num} Claude error: {error_msg}")
+                            else:
+                                # Claude worked but no changes detected (shouldn't happen, but log it)
+                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: No changes detected\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+                                logger.warning(f"Job {job_id}: Episode {ep_num} - Claude returned success but no changes")
 
                         # Send enhancement complete with all changes (always send, even if empty)
                         total_words_added = sum(c['words_added'] for c in all_changes) if all_changes else 0
