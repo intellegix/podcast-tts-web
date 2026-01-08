@@ -132,6 +132,18 @@ MAX_CLAUDE_CONCURRENT = int(os.environ.get('CLAUDE_MAX_CONCURRENT', '20'))  # Pa
 CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-3-5-sonnet-20241022')
 CLAUDE_MODEL_FALLBACK = 'claude-3-haiku-20240307'
 
+# ============== Multiplier Logic Configuration ==============
+# Dynamic scaling based on estimated audio duration (1 agent per minute of audio)
+MULTIPLIER_ENABLED = os.environ.get('MULTIPLIER_ENABLED', 'true').lower() == 'true'
+MIN_AGENTS = int(os.environ.get('MIN_AGENTS', '5'))           # Minimum concurrent agents
+MAX_AGENTS = int(os.environ.get('MAX_AGENTS', '100'))         # Maximum concurrent agents (hard cap)
+AGENTS_PER_MINUTE = float(os.environ.get('AGENTS_PER_MINUTE', '1.0'))  # Scaling factor
+
+# Batch processing thresholds for very long content
+BATCH_THRESHOLD_MINUTES = int(os.environ.get('BATCH_THRESHOLD_MINUTES', '60'))  # Enable batching above this
+MAX_EPISODES_PER_BATCH = int(os.environ.get('MAX_EPISODES_PER_BATCH', '10'))    # Episodes per batch
+BATCH_COOLDOWN_SECONDS = int(os.environ.get('BATCH_COOLDOWN_SECONDS', '5'))     # Pause between batches
+
 # Startup warnings for missing API keys (using logger)
 if not OPENAI_API_KEY:
     logger.warning("OPENAI_API_KEY not set - TTS generation will fail")
@@ -525,6 +537,149 @@ def concatenate_mp3_files(file_paths, output_path):
             with open(fpath, 'rb') as infile:
                 outfile.write(infile.read())
     return output_path
+
+
+# ============== Multiplier Logic: Dynamic Agent Scaling ==============
+
+def estimate_audio_duration(text: str) -> dict:
+    """
+    Estimate audio duration from text content.
+
+    TTS typically produces 150-180 words/minute for natural speech.
+    We use 150 words/min as a conservative estimate.
+
+    Returns dict with:
+    - word_count: total words
+    - char_count: total characters
+    - estimated_minutes: estimated audio duration
+    - recommended_agents: suggested agent count (1 per minute)
+    """
+    words = text.split()
+    word_count = len(words)
+    char_count = len(text)
+
+    # Conservative estimate: 150 words/minute for TTS
+    estimated_minutes = word_count / 150
+
+    # Chunk estimation: ~2000 chars per TTS chunk
+    estimated_chunks = max(1, char_count // 2000)
+
+    # Agent recommendation: 1 per minute, bounded by MIN/MAX
+    recommended_agents = max(MIN_AGENTS, min(MAX_AGENTS, int(estimated_minutes * AGENTS_PER_MINUTE)))
+
+    return {
+        'word_count': word_count,
+        'char_count': char_count,
+        'estimated_minutes': round(estimated_minutes, 1),
+        'estimated_chunks': estimated_chunks,
+        'recommended_agents': recommended_agents
+    }
+
+
+def calculate_scaled_agents(duration: dict, episode_count: int) -> dict:
+    """
+    Calculate optimal agent counts for each processing stage based on estimated duration.
+
+    Implements "1 agent per minute of audio" scaling with configurable multiplier.
+
+    Args:
+        duration: Output from estimate_audio_duration()
+        episode_count: Number of episodes to process
+
+    Returns dict with:
+        - perplexity_agents: Scaled Perplexity concurrent limit
+        - claude_agents: Scaled Claude concurrent limit
+        - tts_agents: Scaled TTS concurrent limit
+        - use_batching: Whether to enable batch processing
+        - batch_size: Episodes per batch (if batching enabled)
+        - target_agents: Base target agent count
+        - estimated_minutes: Estimated audio duration
+    """
+    if not MULTIPLIER_ENABLED:
+        # Return current defaults when multiplier is disabled
+        return {
+            'perplexity_agents': MAX_PERPLEXITY_CONCURRENT,
+            'claude_agents': MAX_CLAUDE_CONCURRENT,
+            'tts_agents': MAX_CONCURRENT_CHUNKS if MAX_CONCURRENT_CHUNKS > 0 else 0,
+            'use_batching': False,
+            'batch_size': episode_count,
+            'target_agents': MAX_PERPLEXITY_CONCURRENT,
+            'estimated_minutes': duration.get('estimated_minutes', 0)
+        }
+
+    minutes = duration.get('estimated_minutes', 0)
+
+    # Base calculation: 1 agent per minute of estimated audio
+    target_agents = int(minutes * AGENTS_PER_MINUTE)
+    target_agents = max(MIN_AGENTS, min(MAX_AGENTS, target_agents))
+
+    # Determine if batching is needed for very long content
+    use_batching = minutes >= BATCH_THRESHOLD_MINUTES or episode_count > MAX_EPISODES_PER_BATCH
+    batch_size = MAX_EPISODES_PER_BATCH if use_batching else episode_count
+
+    # Scale each provider independently
+    # Perplexity: generally more forgiving, scale fully
+    perplexity_agents = min(target_agents, MAX_AGENTS)
+
+    # Claude: slightly more conservative due to token limits
+    claude_agents = min(int(target_agents * 0.8), MAX_AGENTS)
+
+    # TTS: OpenAI is rate-limited at 8/sec, cap to prevent excessive 429s
+    tts_agents = min(target_agents, 50)
+
+    logger.info(f"Multiplier scaling: {minutes:.1f} min -> {target_agents} agents "
+                f"(Perplexity={perplexity_agents}, Claude={claude_agents}, TTS={tts_agents}), "
+                f"batching={use_batching}")
+
+    return {
+        'perplexity_agents': perplexity_agents,
+        'claude_agents': claude_agents,
+        'tts_agents': tts_agents,
+        'use_batching': use_batching,
+        'batch_size': batch_size,
+        'target_agents': target_agents,
+        'estimated_minutes': minutes
+    }
+
+
+def process_episodes_in_batches(episodes: list, batch_size: int, process_func: callable,
+                                 pool_size: int, stage_name: str = "processing") -> list:
+    """
+    Process episodes in batches to prevent memory exhaustion for long content.
+
+    Args:
+        episodes: List of episode dicts to process
+        batch_size: Max episodes per batch
+        process_func: Function to call for each episode
+        pool_size: GeventPool size for parallel processing
+        stage_name: Name for logging
+
+    Returns:
+        List of all results from all batches
+    """
+    total_episodes = len(episodes)
+    num_batches = (total_episodes + batch_size - 1) // batch_size  # Ceiling division
+    all_results = []
+
+    for batch_num in range(num_batches):
+        start_idx = batch_num * batch_size
+        end_idx = min(start_idx + batch_size, total_episodes)
+        batch = episodes[start_idx:end_idx]
+
+        logger.info(f"Batch {batch_num + 1}/{num_batches}: {stage_name} episodes {start_idx + 1}-{end_idx} "
+                    f"with {pool_size} parallel agents")
+
+        # Process this batch in parallel
+        pool = GeventPool(size=pool_size)
+        batch_results = list(pool.imap_unordered(process_func, batch))
+        all_results.extend(batch_results)
+
+        # Cooldown between batches (except last batch)
+        if batch_num < num_batches - 1 and BATCH_COOLDOWN_SECONDS > 0:
+            logger.info(f"Batch cooldown: {BATCH_COOLDOWN_SECONDS}s before next batch")
+            gevent.sleep(BATCH_COOLDOWN_SECONDS)
+
+    return all_results
 
 
 def detect_speakers(text):
@@ -1340,6 +1495,26 @@ def generate():
                     if total_episodes == 0:
                         yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"No episodes detected, skipping AI enhancement\"}}\n\n"
                     else:
+                        # ===== MULTIPLIER LOGIC: Calculate dynamic scaling =====
+                        duration_estimate = estimate_audio_duration(text)
+                        scaling = calculate_scaled_agents(duration_estimate, total_episodes)
+
+                        # Send scaling info to UI
+                        scaling_info = {
+                            'status': 'processing',
+                            'stage': 'analyze',
+                            'message': f"Detected {duration_estimate['estimated_minutes']:.0f} min content ({duration_estimate['word_count']} words) - scaling to {scaling['target_agents']} parallel agents",
+                            'scaling': {
+                                'estimated_minutes': duration_estimate['estimated_minutes'],
+                                'word_count': duration_estimate['word_count'],
+                                'target_agents': scaling['target_agents'],
+                                'use_batching': scaling['use_batching'],
+                                'batch_size': scaling['batch_size']
+                            }
+                        }
+                        yield f"data: {json.dumps(scaling_info)}\n\n"
+                        logger.info(f"Job {job_id}: Multiplier logic - {duration_estimate['estimated_minutes']:.1f} min, {scaling['target_agents']} agents, batching={scaling['use_batching']}")
+
                         # Extract speakers for consistency
                         speakers = detect_speakers(text)
                         if not speakers:
@@ -1351,8 +1526,8 @@ def generate():
                         research_findings = []
                         research_map = {}
 
-                        # ===== STAGE 1: PERPLEXITY RESEARCH (PARALLEL with 20 agents) =====
-                        research_pool_size = min(MAX_PERPLEXITY_CONCURRENT, total_episodes)
+                        # ===== STAGE 1: PERPLEXITY RESEARCH (PARALLEL with scaled agents) =====
+                        research_pool_size = min(scaling['perplexity_agents'], total_episodes)
                         research_start = time.time()
                         yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Starting Perplexity research with {research_pool_size} parallel agents...\"}}\n\n"
                         logger.info(f"Job {job_id}: Starting Perplexity research for {total_episodes} episodes ({research_pool_size} parallel)")
@@ -1405,8 +1580,8 @@ def generate():
                             }
                             yield f"data: {json.dumps(research_data)}\n\n"
 
-                        # ===== STAGE 2: CLAUDE ENHANCEMENT (PARALLEL with 20 agents) =====
-                        enhance_pool_size = min(MAX_CLAUDE_CONCURRENT, total_episodes)
+                        # ===== STAGE 2: CLAUDE ENHANCEMENT (PARALLEL with scaled agents) =====
+                        enhance_pool_size = min(scaling['claude_agents'], total_episodes)
                         enhance_start = time.time()
                         yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Starting Claude enhancement with {enhance_pool_size} parallel agents...\"}}\n\n"
                         logger.info(f"Job {job_id}: Starting Claude enhancement for {total_episodes} episodes ({enhance_pool_size} parallel)")
@@ -1555,10 +1730,20 @@ def generate():
             completed = 0
             errors = []
 
-            # Use gevent pool for parallel API calls - 1 agent per chunk
-            pool_size = MAX_CONCURRENT_CHUNKS if MAX_CONCURRENT_CHUNKS > 0 else total_chunks
+            # Use gevent pool for parallel API calls - scaled based on content length
+            # Apply multiplier logic for TTS scaling
+            tts_duration = estimate_audio_duration(text)
+            tts_scaling = calculate_scaled_agents(tts_duration, 1)
+
+            if MAX_CONCURRENT_CHUNKS > 0:
+                pool_size = MAX_CONCURRENT_CHUNKS  # Explicit override
+            elif tts_scaling['tts_agents'] > 0:
+                pool_size = min(tts_scaling['tts_agents'], total_chunks)
+            else:
+                pool_size = total_chunks
+
             pool = GeventPool(size=pool_size)
-            logger.info(f"Job {job_id}: Starting parallel generation with {pool_size} concurrent agents")
+            logger.info(f"Job {job_id}: TTS scaling - {tts_duration['estimated_minutes']:.1f} min -> {pool_size} concurrent agents for {total_chunks} chunks")
 
             # Process chunks in parallel
             for result in pool.imap_unordered(generate_single_chunk, chunk_args):

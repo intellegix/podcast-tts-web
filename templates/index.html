@@ -372,6 +372,21 @@
                     addActivity(stageIcons[data.stage], data.message, data.stage);
                 }
 
+                // Handle scaling info from multiplier logic
+                if (data.scaling) {
+                    const s = data.scaling;
+                    addActivity('⚡',
+                        `Auto-scaled to ${s.target_agents} agents for ${s.estimated_minutes.toFixed(0)} min content (${s.word_count.toLocaleString()} words)`,
+                        'analyze'
+                    );
+                    if (s.use_batching) {
+                        addActivity('📦',
+                            `Batch mode enabled: processing ${s.batch_size} episodes per batch`,
+                            'analyze'
+                        );
+                    }
+                }
+
                 // Handle citations from Perplexity
                 if (data.citations && data.citations.length > 0) {
                     updateSources(data.citations, data.research_findings);
