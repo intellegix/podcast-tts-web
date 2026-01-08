@@ -529,7 +529,7 @@ def get_voice_for_speaker(speaker_name):
 def assign_speaker_voices(speakers):
     """
     Assign voices ensuring diversity for 2-speaker podcasts.
-    Forces male/female voice contrast for 2-host shows.
+    For 2-host shows: ALWAYS uses echo (male) + shimmer (female) for clarity.
     """
     if len(speakers) == 0:
         return {}
@@ -538,21 +538,15 @@ def assign_speaker_voices(speakers):
         return {speakers[0]: get_voice_for_speaker(speakers[0])}
 
     if len(speakers) == 2:
-        # Force one male, one female voice for contrast
-        voice1 = get_voice_for_speaker(speakers[0])
-        voice2 = get_voice_for_speaker(speakers[1])
-
-        # If both got same voice, alternate to ensure diversity
-        if voice1 == voice2:
-            if voice1 == 'echo':  # Both detected as male
-                voice2 = 'shimmer'  # Make second female
-            elif voice1 == 'shimmer':  # Both detected as female
-                voice2 = 'echo'  # Make second male
-            else:  # Both neutral/alloy
-                voice1 = 'echo'
-                voice2 = 'shimmer'
-
-        return {speakers[0]: voice1, speakers[1]: voice2}
+        # ALWAYS force male + female for 2-host podcasts - maximum clarity
+        # First speaker gets echo (male deep voice)
+        # Second speaker gets shimmer (female voice)
+        voice_assignment = {
+            speakers[0]: 'echo',     # Male voice
+            speakers[1]: 'shimmer'   # Female voice
+        }
+        logger.info(f"2-host podcast: {speakers[0]}=echo(male), {speakers[1]}=shimmer(female)")
+        return voice_assignment
 
     # 3+ speakers: use detected genders, but try to ensure variety
     voices = {}
