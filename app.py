@@ -121,12 +121,16 @@ FEMALE_NAMES = {
 # Parallel processing configuration
 # Set to 0 for unlimited (1 agent per chunk), or a number to limit concurrent workers
 MAX_CONCURRENT_CHUNKS = int(os.environ.get('TTS_MAX_CONCURRENT', '0'))  # 0 = unlimited (1 per chunk)
-MAX_AI_CONCURRENT = int(os.environ.get('AI_MAX_CONCURRENT', '5'))  # Limit concurrent AI API calls
+MAX_AI_CONCURRENT = int(os.environ.get('AI_MAX_CONCURRENT', '20'))  # Legacy fallback - enterprise default
+
+# Enterprise parallelization - separate limits for each AI provider
+MAX_PERPLEXITY_CONCURRENT = int(os.environ.get('PERPLEXITY_MAX_CONCURRENT', '20'))  # Parallel Perplexity agents
+MAX_CLAUDE_CONCURRENT = int(os.environ.get('CLAUDE_MAX_CONCURRENT', '20'))  # Parallel Claude agents
 
 # Claude model configuration (allows updating without code change)
-# Primary: Claude Sonnet 4, Fallback: Claude 3.5 Sonnet for broader availability
-CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-20250514')
-CLAUDE_MODEL_FALLBACK = 'claude-3-5-sonnet-20241022'
+# Primary: Claude 3.5 Sonnet (known working), Fallback: Claude 3 Haiku (faster)
+CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-3-5-sonnet-20241022')
+CLAUDE_MODEL_FALLBACK = 'claude-3-haiku-20240307'
 
 # Startup warnings for missing API keys (using logger)
 if not OPENAI_API_KEY:
@@ -273,8 +277,10 @@ class ThreadSafeRateLimiter:
             self.requests.append(time.time())
 
 
-# Global rate limiter instance (thread-safe)
-rate_limiter = ThreadSafeRateLimiter(max_requests=8, window_seconds=1)
+# Global rate limiter instances (thread-safe)
+rate_limiter = ThreadSafeRateLimiter(max_requests=8, window_seconds=1)  # OpenAI TTS
+perplexity_rate_limiter = ThreadSafeRateLimiter(max_requests=20, window_seconds=1)  # Perplexity research
+claude_rate_limiter = ThreadSafeRateLimiter(max_requests=20, window_seconds=1)  # Claude enhancement
 
 
 def login_required(f):
@@ -891,6 +897,9 @@ def research_episode_with_perplexity(episode_data):
     topic = header if header else episode_text[:500]
 
     try:
+        # Rate limit Perplexity API calls
+        perplexity_rate_limiter.wait_if_needed()
+
         response = requests.post(
             "https://api.perplexity.ai/chat/completions",
             headers={
@@ -1003,6 +1012,9 @@ def enhance_episode_with_claude(episode_data):
         }
 
     try:
+        # Rate limit Claude API calls
+        claude_rate_limiter.wait_if_needed()
+
         speaker_list = ', '.join(speakers) if speakers else 'ALEX, SARAH'
 
         # Build prompt with research context (but don't embed markers in output)
@@ -1026,9 +1038,9 @@ def enhance_episode_with_claude(episode_data):
                     }
                 ]
             )
-        except anthropic.NotFoundError as model_err:
-            # Model not found, try fallback
-            logger.warning(f"Episode {episode_num}: Model {model_to_use} not found, trying fallback {CLAUDE_MODEL_FALLBACK}")
+        except (anthropic.NotFoundError, anthropic.BadRequestError) as model_err:
+            # Model not found or bad request - try fallback model
+            logger.warning(f"Episode {episode_num}: Model {model_to_use} failed ({type(model_err).__name__}), trying fallback {CLAUDE_MODEL_FALLBACK}")
             model_to_use = CLAUDE_MODEL_FALLBACK
             response = client.messages.create(
                 model=model_to_use,
@@ -1107,9 +1119,9 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
         'research_findings': []
     }
 
-    # Limit concurrent API calls to prevent rate limiting
-    research_pool_size = min(MAX_AI_CONCURRENT, total_episodes)
-    enhance_pool_size = min(MAX_AI_CONCURRENT, total_episodes)
+    # Enterprise-grade parallel processing with separate limits per AI provider
+    research_pool_size = min(MAX_PERPLEXITY_CONCURRENT, total_episodes)
+    enhance_pool_size = min(MAX_CLAUDE_CONCURRENT, total_episodes)
 
     # Stage 1: Perplexity Research - PARALLEL (limited concurrency)
     if progress_callback:
@@ -1318,19 +1330,24 @@ def generate():
                         research_findings = []
                         research_map = {}
 
-                        # ===== STAGE 1: PERPLEXITY RESEARCH (with real-time updates) =====
-                        yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Starting Perplexity research for {total_episodes} episodes...\"}}\n\n"
-                        logger.info(f"Job {job_id}: Starting Perplexity research for {total_episodes} episodes")
+                        # ===== STAGE 1: PERPLEXITY RESEARCH (PARALLEL with 20 agents) =====
+                        research_pool_size = min(MAX_PERPLEXITY_CONCURRENT, total_episodes)
+                        research_start = time.time()
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Starting Perplexity research with {research_pool_size} parallel agents...\"}}\n\n"
+                        logger.info(f"Job {job_id}: Starting Perplexity research for {total_episodes} episodes ({research_pool_size} parallel)")
 
-                        for i, ep in enumerate(episodes):
-                            ep_num = ep.get('episode_num', i+1)
-                            topic = ep.get('header', '')[:80] or f"Episode {ep_num}"
+                        # Run all research requests in parallel
+                        research_pool = GeventPool(size=research_pool_size)
+                        research_results = list(research_pool.imap_unordered(
+                            research_episode_with_perplexity,
+                            episodes
+                        ))
 
-                            # Send progress update BEFORE researching
-                            yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Researching: {topic}...\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
-
-                            # Research this episode
-                            result = research_episode_with_perplexity(ep)
+                        # Process results and send updates
+                        completed = 0
+                        for result in research_results:
+                            completed += 1
+                            ep_num = result.get('episode_num', 0)
 
                             if result['success']:
                                 research_map[ep_num] = result['research']
@@ -1344,45 +1361,54 @@ def generate():
                                             all_citations.append(citation)
 
                                 # Collect findings
+                                topic = result.get('topic', f'Episode {ep_num}')
                                 research_findings.append({
                                     'episode': ep_num,
-                                    'topic': result.get('topic', topic),
+                                    'topic': topic,
                                     'findings_preview': result['research'][:300] + '...' if len(result['research']) > 300 else result['research'],
                                     'source_count': len(result.get('citations', []))
                                 })
 
                                 # Send update with sources found
-                                yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Episode {ep_num}: Found {len(result.get('citations', []))} sources\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+                                yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Episode {ep_num}: Found {len(result.get('citations', []))} sources\", \"current\": {completed}, \"total\": {total_episodes}}}\n\n"
 
-                        # Send research complete with all citations
+                        # Send research complete with all citations and timing
+                        research_time = time.time() - research_start
                         if all_citations:
                             research_data = {
                                 'status': 'processing',
                                 'stage': 'research',
-                                'message': f"Research complete: {len(all_citations)} quality sources found",
+                                'message': f"Research complete in {research_time:.1f}s: {len(all_citations)} quality sources found ({total_episodes/max(research_time, 0.1):.1f} eps/sec)",
                                 'citations': all_citations[:15],
                                 'research_findings': research_findings
                             }
                             yield f"data: {json.dumps(research_data)}\n\n"
 
-                        # ===== STAGE 2: CLAUDE ENHANCEMENT (with real-time updates) =====
-                        yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Starting Claude enhancement for {total_episodes} episodes...\"}}\n\n"
-                        logger.info(f"Job {job_id}: Starting Claude enhancement for {total_episodes} episodes")
+                        # ===== STAGE 2: CLAUDE ENHANCEMENT (PARALLEL with 20 agents) =====
+                        enhance_pool_size = min(MAX_CLAUDE_CONCURRENT, total_episodes)
+                        enhance_start = time.time()
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Starting Claude enhancement with {enhance_pool_size} parallel agents...\"}}\n\n"
+                        logger.info(f"Job {job_id}: Starting Claude enhancement for {total_episodes} episodes ({enhance_pool_size} parallel)")
 
-                        enhanced_map = {}
-                        for i, ep in enumerate(episodes):
-                            ep_num = ep.get('episode_num', i+1)
-                            topic = ep.get('header', '')[:60] or f"Episode {ep_num}"
-
-                            # Send progress update BEFORE enhancing
-                            yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Enhancing: {topic}...\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
-
-                            # Prepare episode data with research
+                        # Prepare all episodes with speakers and research context
+                        for ep in episodes:
+                            ep_num = ep.get('episode_num', 0)
                             ep['speakers'] = speakers
                             ep['research'] = research_map.get(ep_num, '')
 
-                            # Enhance this episode
-                            result = enhance_episode_with_claude(ep)
+                        # Run all enhancement requests in parallel
+                        enhance_pool = GeventPool(size=enhance_pool_size)
+                        enhance_results = list(enhance_pool.imap_unordered(
+                            enhance_episode_with_claude,
+                            episodes
+                        ))
+
+                        # Process results and send updates
+                        enhanced_map = {}
+                        completed = 0
+                        for result in enhance_results:
+                            completed += 1
+                            ep_num = result.get('episode_num', 0)
                             enhanced_map[ep_num] = result['enhanced_text']
                             logger.info(f"Job {job_id}: Episode {ep_num} enhance result - success={result['success']}, has_changes={result.get('changes') is not None}, error={result.get('error')}")
 
@@ -1397,23 +1423,24 @@ def generate():
                                 })
 
                                 # Send update with changes
-                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: +{changes['words_added']} words added\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: +{changes['words_added']} words added\", \"current\": {completed}, \"total\": {total_episodes}}}\n\n"
                             elif result.get('error'):
                                 # Claude not configured or error occurred - show specific error in UI
                                 error_msg = result.get('error', 'Unknown error')
-                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: ⚠️ {error_msg}\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: ⚠️ {error_msg}\", \"current\": {completed}, \"total\": {total_episodes}}}\n\n"
                                 logger.warning(f"Job {job_id}: Episode {ep_num} Claude error: {error_msg}")
                             else:
                                 # Claude worked but no changes detected (shouldn't happen, but log it)
-                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: No changes detected\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: No changes detected\", \"current\": {completed}, \"total\": {total_episodes}}}\n\n"
                                 logger.warning(f"Job {job_id}: Episode {ep_num} - Claude returned success but no changes")
 
-                        # Send enhancement complete with all changes (always send, even if empty)
+                        # Send enhancement complete with all changes and timing
+                        enhance_time = time.time() - enhance_start
                         total_words_added = sum(c['words_added'] for c in all_changes) if all_changes else 0
                         enhance_data = {
                             'status': 'processing',
                             'stage': 'enhance',
-                            'message': f"Enhancement complete: +{total_words_added} words across {len(all_changes)} episodes",
+                            'message': f"Enhancement complete in {enhance_time:.1f}s: +{total_words_added} words across {len(all_changes)} episodes ({total_episodes/max(enhance_time, 0.1):.1f} eps/sec)",
                             'changes': all_changes,
                             'total_citations': len(all_citations)
                         }
