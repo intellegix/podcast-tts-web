@@ -211,9 +211,14 @@
                 <h2>Audio Generated!</h2>
                 <p id="result-filename" class="result-filename"></p>
                 <p id="result-size">Size: 0 MB</p>
-                <a id="download-link" class="download-btn" href="#">
-                    Download MP3
-                </a>
+                <div class="download-buttons">
+                    <a id="download-link" class="download-btn" href="#">
+                        Download MP3
+                    </a>
+                    <a id="transcript-link" class="download-btn transcript-btn hidden" href="#">
+                        📄 Download Transcript
+                    </a>
+                </div>
             </div>
 
             <div id="error-section" class="hidden">
@@ -245,6 +250,7 @@
         const resultSize = document.getElementById('result-size');
         const errorMessage = document.getElementById('error-message');
         const resultFilename = document.getElementById('result-filename');
+        const transcriptLink = document.getElementById('transcript-link');
 
         // Workbench elements
         const activityFeed = document.getElementById('activity-feed');
@@ -433,6 +439,13 @@
                         fetch(`/cleanup/${data.download_id}`, { method: 'POST' });
                     }, 5000);
                 };
+
+                // Show transcript download link
+                if (data.transcript_id) {
+                    transcriptLink.href = `/download-transcript/${data.transcript_id}`;
+                    transcriptLink.classList.remove('hidden');
+                    addActivity('📄', 'Transcript available for download', 'complete');
+                }
             } else if (data.status === 'error') {
                 showError(data.message);
             }
@@ -569,6 +582,7 @@
             changeCountBadge.classList.add('hidden');
             chunkFill.style.width = '0%';
             chunkCount.textContent = '0 / 0 chunks';
+            transcriptLink.classList.add('hidden');
         }
 
         function showError(message) {

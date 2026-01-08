@@ -1023,11 +1023,18 @@ def auto_expand_script(text, progress_callback=None):
             # Keep original text on failure
             expanded_episodes[ep['episode_num']] = ep['text']
 
-    # Rebuild the full script with expanded episodes
+    # Rebuild the full script with expanded episodes (preserving headers)
     result_parts = []
     for ep in episodes:
         if ep['episode_num'] in expanded_episodes:
-            result_parts.append(expanded_episodes[ep['episode_num']])
+            # Preserve episode header before expanded content
+            header = ep['header']
+            expanded = expanded_episodes[ep['episode_num']]
+            # Only add header if expanded text doesn't already start with it
+            if not expanded.strip().upper().startswith(header.strip().upper()[:20]):
+                result_parts.append(f"{header}\n\n{expanded}")
+            else:
+                result_parts.append(expanded)
         else:
             result_parts.append(ep['text'])
 
@@ -1663,6 +1670,18 @@ def generate():
             # Preprocess text
             processed = preprocess_text(text)
 
+            # Save transcript file for download
+            transcript_path = job_dir / 'transcript.txt'
+            try:
+                with open(transcript_path, 'w', encoding='utf-8') as f:
+                    f.write(f"# Podcast Transcript\n")
+                    f.write(f"# Generated: {datetime.now().isoformat()}\n")
+                    f.write(f"# Job ID: {job_id}\n\n")
+                    f.write(text)  # Save the enhanced/expanded script
+                logger.info(f"Job {job_id}: Transcript saved ({len(text)} chars)")
+            except Exception as e:
+                logger.warning(f"Job {job_id}: Failed to save transcript: {e}")
+
             # Check for multi-voice mode with speaker detection
             speaker_voices = {}
             if multi_voice:
@@ -1773,7 +1792,7 @@ def generate():
                 size_mb = output_path.stat().st_size / (1024 * 1024)
                 # Generate smart filename based on content
                 smart_filename = generate_smart_filename(text)
-                yield f"data: {{\"status\": \"complete\", \"stage\": \"combine\", \"message\": \"Audio generated successfully!\", \"download_id\": \"{job_id}\", \"size_mb\": {size_mb:.1f}, \"filename\": \"{smart_filename}\"}}\n\n"
+                yield f"data: {{\"status\": \"complete\", \"stage\": \"combine\", \"message\": \"Audio generated successfully!\", \"download_id\": \"{job_id}\", \"size_mb\": {size_mb:.1f}, \"filename\": \"{smart_filename}\", \"transcript_id\": \"{job_id}\"}}\n\n"
             else:
                 yield f"data: {{\"status\": \"error\", \"message\": \"Failed to create final audio file\"}}\n\n"
 
@@ -1804,6 +1823,26 @@ def download(job_id):
         as_attachment=True,
         download_name=f"podcast-{job_id}.mp3",
         mimetype='audio/mpeg'
+    )
+
+
+@app.route('/download-transcript/<job_id>')
+@login_required
+def download_transcript(job_id):
+    """Download transcript file"""
+    # Sanitize job_id to prevent path traversal
+    job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
+
+    transcript_path = TEMP_DIR / job_id / "transcript.txt"
+
+    if not transcript_path.exists():
+        return jsonify({'error': 'Transcript not found'}), 404
+
+    return send_file(
+        transcript_path,
+        as_attachment=True,
+        download_name=f"podcast_transcript_{job_id[:8]}.txt",
+        mimetype='text/plain'
     )
 
 

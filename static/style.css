@@ -297,6 +297,21 @@ button[type="submit"]:disabled {
     box-shadow: 0 10px 30px rgba(34, 197, 94, 0.3);
 }
 
+.download-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    justify-content: center;
+}
+
+.transcript-btn {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+}
+
+.transcript-btn:hover {
+    box-shadow: 0 10px 30px rgba(59, 130, 246, 0.3);
+}
+
 /* Error section */
 #error-section {
     text-align: center;
