@@ -1279,48 +1279,131 @@ def generate():
                         yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Script expansion failed: {str(e)}. Continuing with original text...\"}}\n\n"
                         logger.error(f"Job {job_id}: Expansion failed: {e}")
 
-            # Run AI Enhancement Pipeline (Perplexity Research + Claude Polish)
+            # Run AI Enhancement Pipeline (Perplexity Research + Claude Polish) - INLINE for real-time SSE
             if ai_enhance:
-                yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Researching topics with Perplexity AI...\"}}\n\n"
-                logger.info(f"Job {job_id}: Starting multi-AI enhancement pipeline")
-
                 try:
-                    def progress_callback(msg):
-                        # Note: Can't yield from inside callback, just log
-                        logger.info(f"Job {job_id}: {msg}")
+                    # Parse episodes
+                    episodes = parse_episodes(text)
+                    total_episodes = len(episodes)
 
-                    # Run the enhancement pipeline
-                    enhanced_text, stats = run_ai_enhancement_pipeline(text, progress_callback)
-
-                    # Send research findings with sources
-                    if stats['research_count'] > 0:
-                        # Send research results with citations
-                        research_data = {
-                            'status': 'processing',
-                            'stage': 'research',
-                            'message': f"Found {len(stats['all_citations'])} sources across {stats['research_count']} episodes",
-                            'citations': stats['all_citations'][:15],  # Top 15 sources
-                            'research_findings': stats['research_findings']
-                        }
-                        yield f"data: {json.dumps(research_data)}\n\n"
-
-                        # Send enhance stage with Claude info
-                        yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Polishing dialogue with Claude AI...\"}}\n\n"
-
-                    if stats['research_count'] > 0 or stats['enhance_count'] > 0:
-                        # Send enhancement results with changes
-                        enhance_data = {
-                            'status': 'processing',
-                            'stage': 'enhance',
-                            'message': f"AI pipeline complete: researched {stats['research_count']}, enhanced {stats['enhance_count']} episodes",
-                            'changes': stats['all_changes'],
-                            'total_citations': len(stats['all_citations'])
-                        }
-                        yield f"data: {json.dumps(enhance_data)}\n\n"
-                        text = enhanced_text
-                        logger.info(f"Job {job_id}: Enhancement complete: {stats['research_count']} researched, {stats['enhance_count']} enhanced, {len(stats['all_citations'])} sources")
+                    if total_episodes == 0:
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"No episodes detected, skipping AI enhancement\"}}\n\n"
                     else:
-                        yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"AI enhancement skipped (no episodes detected)\"}}\n\n"
+                        # Extract speakers for consistency
+                        speakers = detect_speakers(text)
+                        if not speakers:
+                            speakers = ['ALEX', 'SARAH']
+
+                        # Stats tracking
+                        all_citations = []
+                        all_changes = []
+                        research_findings = []
+                        research_map = {}
+
+                        # ===== STAGE 1: PERPLEXITY RESEARCH (with real-time updates) =====
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Starting Perplexity research for {total_episodes} episodes...\"}}\n\n"
+                        logger.info(f"Job {job_id}: Starting Perplexity research for {total_episodes} episodes")
+
+                        for i, ep in enumerate(episodes):
+                            ep_num = ep.get('episode_num', i+1)
+                            topic = ep.get('header', '')[:80] or f"Episode {ep_num}"
+
+                            # Send progress update BEFORE researching
+                            yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Researching: {topic}...\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+
+                            # Research this episode
+                            result = research_episode_with_perplexity(ep)
+
+                            if result['success']:
+                                research_map[ep_num] = result['research']
+
+                                # Collect citations (filter out generic AI sites)
+                                for citation in result.get('citations', []):
+                                    # Skip generic AI company sites
+                                    skip_domains = ['anthropic.com', 'claude.ai', 'openai.com', 'perplexity.ai', 'google.com', 'bing.com']
+                                    if not any(domain in citation.lower() for domain in skip_domains):
+                                        if citation not in all_citations:
+                                            all_citations.append(citation)
+
+                                # Collect findings
+                                research_findings.append({
+                                    'episode': ep_num,
+                                    'topic': result.get('topic', topic),
+                                    'findings_preview': result['research'][:300] + '...' if len(result['research']) > 300 else result['research'],
+                                    'source_count': len(result.get('citations', []))
+                                })
+
+                                # Send update with sources found
+                                yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Episode {ep_num}: Found {len(result.get('citations', []))} sources\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+
+                        # Send research complete with all citations
+                        if all_citations:
+                            research_data = {
+                                'status': 'processing',
+                                'stage': 'research',
+                                'message': f"Research complete: {len(all_citations)} quality sources found",
+                                'citations': all_citations[:15],
+                                'research_findings': research_findings
+                            }
+                            yield f"data: {json.dumps(research_data)}\n\n"
+
+                        # ===== STAGE 2: CLAUDE ENHANCEMENT (with real-time updates) =====
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Starting Claude enhancement for {total_episodes} episodes...\"}}\n\n"
+                        logger.info(f"Job {job_id}: Starting Claude enhancement for {total_episodes} episodes")
+
+                        enhanced_map = {}
+                        for i, ep in enumerate(episodes):
+                            ep_num = ep.get('episode_num', i+1)
+                            topic = ep.get('header', '')[:60] or f"Episode {ep_num}"
+
+                            # Send progress update BEFORE enhancing
+                            yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Enhancing: {topic}...\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+
+                            # Prepare episode data with research
+                            ep['speakers'] = speakers
+                            ep['research'] = research_map.get(ep_num, '')
+
+                            # Enhance this episode
+                            result = enhance_episode_with_claude(ep)
+                            enhanced_map[ep_num] = result['enhanced_text']
+
+                            if result['success'] and result.get('changes'):
+                                changes = result['changes']
+                                all_changes.append({
+                                    'episode': ep_num,
+                                    'words_added': changes['words_added'],
+                                    'words_removed': changes['words_removed'],
+                                    'length_change': changes['length_change'],
+                                    'sample_additions': changes['sample_additions'][:3]
+                                })
+
+                                # Send update with changes
+                                yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Episode {ep_num}: +{changes['words_added']} words added\", \"current\": {i+1}, \"total\": {total_episodes}}}\n\n"
+
+                        # Send enhancement complete with all changes
+                        if all_changes:
+                            total_words_added = sum(c['words_added'] for c in all_changes)
+                            enhance_data = {
+                                'status': 'processing',
+                                'stage': 'enhance',
+                                'message': f"Enhancement complete: +{total_words_added} words across {len(all_changes)} episodes",
+                                'changes': all_changes,
+                                'total_citations': len(all_citations)
+                            }
+                            yield f"data: {json.dumps(enhance_data)}\n\n"
+
+                        # Rebuild full script with enhanced episodes
+                        result_parts = []
+                        for ep in sorted(episodes, key=lambda x: x.get('episode_num', 0)):
+                            ep_num = ep.get('episode_num', 0)
+                            if ep_num in enhanced_map:
+                                clean_text = re.sub(r'\[RESEARCH[^\]]*\].*?\[END[^\]]*\]', '', enhanced_map[ep_num], flags=re.DOTALL)
+                                result_parts.append(clean_text.strip())
+                            else:
+                                result_parts.append(ep['text'])
+
+                        text = '\n\n'.join(result_parts)
+                        logger.info(f"Job {job_id}: AI pipeline complete: {len(research_findings)} researched, {len(all_changes)} enhanced, {len(all_citations)} sources")
 
                 except Exception as e:
                     yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"AI enhancement failed: {str(e)}. Continuing without enhancement...\"}}\n\n"
