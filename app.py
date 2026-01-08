@@ -124,7 +124,9 @@ MAX_CONCURRENT_CHUNKS = int(os.environ.get('TTS_MAX_CONCURRENT', '0'))  # 0 = un
 MAX_AI_CONCURRENT = int(os.environ.get('AI_MAX_CONCURRENT', '5'))  # Limit concurrent AI API calls
 
 # Claude model configuration (allows updating without code change)
+# Primary: Claude Sonnet 4, Fallback: Claude 3.5 Sonnet for broader availability
 CLAUDE_MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-4-20250514')
+CLAUDE_MODEL_FALLBACK = 'claude-3-5-sonnet-20241022'
 
 # Startup warnings for missing API keys (using logger)
 if not OPENAI_API_KEY:
@@ -1011,18 +1013,36 @@ def enhance_episode_with_claude(episode_data):
 
         prompt_parts.append(f"\n\nEPISODE TO ENHANCE:\n{episode_text}")
 
-        response = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=8000,
-            messages=[
-                {
-                    "role": "user",
-                    "content": ''.join(prompt_parts)
-                }
-            ]
-        )
+        # Try primary model, fallback to older model if not available
+        model_to_use = CLAUDE_MODEL
+        try:
+            response = client.messages.create(
+                model=model_to_use,
+                max_tokens=8000,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": ''.join(prompt_parts)
+                    }
+                ]
+            )
+        except anthropic.NotFoundError as model_err:
+            # Model not found, try fallback
+            logger.warning(f"Episode {episode_num}: Model {model_to_use} not found, trying fallback {CLAUDE_MODEL_FALLBACK}")
+            model_to_use = CLAUDE_MODEL_FALLBACK
+            response = client.messages.create(
+                model=model_to_use,
+                max_tokens=8000,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": ''.join(prompt_parts)
+                    }
+                ]
+            )
 
         enhanced_text = response.content[0].text
+        logger.info(f"Episode {episode_num} enhanced using model: {model_to_use}")
 
         # Strip any research markers that might have leaked through
         enhanced_text = re.sub(r'\[RESEARCH CONTEXT\].*?\[END RESEARCH\]', '', enhanced_text, flags=re.DOTALL)
