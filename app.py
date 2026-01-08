@@ -881,6 +881,7 @@ def research_episode_with_perplexity(episode_data):
     """
     Research a single episode topic using Perplexity API.
     Called in parallel for each episode.
+    Returns research content AND source citations.
     """
     episode_num = episode_data.get('episode_num', 0)
     episode_text = episode_data.get('text', '')
@@ -888,7 +889,7 @@ def research_episode_with_perplexity(episode_data):
 
     # Check if API key is configured
     if not PERPLEXITY_API_KEY:
-        return {'episode_num': episode_num, 'research': '', 'success': False}
+        return {'episode_num': episode_num, 'research': '', 'citations': [], 'success': False}
 
     # Extract the main topic from the episode header/content
     topic = header if header else episode_text[:500]
@@ -901,38 +902,92 @@ def research_episode_with_perplexity(episode_data):
                 "Content-Type": "application/json"
             },
             json={
-                "model": "sonar-pro",  # Updated model name (was llama-3.1-sonar-large-128k-online)
+                "model": "sonar-pro",
                 "messages": [
                     {"role": "system", "content": PERPLEXITY_RESEARCH_PROMPT},
                     {"role": "user", "content": f"Research this podcast episode topic:\n\n{topic}\n\nProvide relevant facts, statistics, and current information."}
                 ],
                 "temperature": 0.3,
-                "max_tokens": 1000
+                "max_tokens": 1000,
+                "return_citations": True  # Request citations from Perplexity
             },
             timeout=60
         )
 
         if response.status_code == 200:
-            research_data = response.json()['choices'][0]['message']['content']
-            logger.info(f"Episode {episode_num} researched successfully")
+            response_json = response.json()
+            research_data = response_json['choices'][0]['message']['content']
+
+            # Extract citations if available (Perplexity returns these in the response)
+            citations = []
+            if 'citations' in response_json:
+                citations = response_json['citations']
+            elif 'citations' in response_json.get('choices', [{}])[0].get('message', {}):
+                citations = response_json['choices'][0]['message']['citations']
+
+            # Also try to extract inline citation URLs from the content
+            url_pattern = r'https?://[^\s\)\]>"]+'
+            inline_urls = re.findall(url_pattern, research_data)
+            for url in inline_urls:
+                if url not in citations:
+                    citations.append(url)
+
+            logger.info(f"Episode {episode_num} researched: {len(citations)} sources found")
             return {
                 'episode_num': episode_num,
                 'research': research_data,
+                'citations': citations[:10],  # Limit to top 10 sources
+                'topic': topic[:100],  # Include topic for display
                 'success': True
             }
         else:
             logger.warning(f"Episode {episode_num} research failed: {response.status_code}")
-            return {'episode_num': episode_num, 'research': '', 'success': False}
+            return {'episode_num': episode_num, 'research': '', 'citations': [], 'success': False}
 
     except Exception as e:
         logger.error(f"Episode {episode_num} research error: {e}")
-        return {'episode_num': episode_num, 'research': '', 'success': False}
+        return {'episode_num': episode_num, 'research': '', 'citations': [], 'success': False}
+
+
+def compute_text_changes(original, enhanced):
+    """
+    Compute a summary of changes between original and enhanced text.
+    Returns stats and sample changes for display.
+    """
+    original_words = set(original.lower().split())
+    enhanced_words = set(enhanced.lower().split())
+
+    added_words = enhanced_words - original_words
+    removed_words = original_words - enhanced_words
+
+    # Count lines changed
+    original_lines = original.strip().split('\n')
+    enhanced_lines = enhanced.strip().split('\n')
+
+    # Simple diff: find lines that are new or significantly different
+    new_lines = []
+    for line in enhanced_lines:
+        line_clean = line.strip()
+        if line_clean and not any(line_clean in orig for orig in original_lines):
+            # This is a new or modified line
+            if len(line_clean) > 20:  # Only meaningful lines
+                new_lines.append(line_clean[:100] + ('...' if len(line_clean) > 100 else ''))
+
+    return {
+        'words_added': len(added_words),
+        'words_removed': len(removed_words),
+        'lines_original': len(original_lines),
+        'lines_enhanced': len(enhanced_lines),
+        'sample_additions': new_lines[:5],  # First 5 new/changed lines
+        'length_change': len(enhanced) - len(original)
+    }
 
 
 def enhance_episode_with_claude(episode_data):
     """
     Enhance a single episode using Claude for natural dialogue.
     Called in parallel for each episode.
+    Returns enhanced text AND change tracking information.
     """
     episode_num = episode_data.get('episode_num', 0)
     episode_text = episode_data.get('text', '')
@@ -945,6 +1000,7 @@ def enhance_episode_with_claude(episode_data):
         return {
             'episode_num': episode_num,
             'enhanced_text': episode_text,  # Return original if no Claude
+            'changes': None,
             'success': False
         }
 
@@ -976,11 +1032,16 @@ def enhance_episode_with_claude(episode_data):
         enhanced_text = re.sub(r'\[RESEARCH CONTEXT\].*?\[END RESEARCH\]', '', enhanced_text, flags=re.DOTALL)
         enhanced_text = re.sub(r'\[RESEARCH NOTES\].*?\[END NOTES\]', '', enhanced_text, flags=re.DOTALL)
 
-        logger.info(f"Episode {episode_num} enhanced ({len(enhanced_text)} chars)")
+        # Compute changes between original and enhanced
+        changes = compute_text_changes(episode_text, enhanced_text)
+
+        logger.info(f"Episode {episode_num} enhanced ({len(enhanced_text)} chars, +{changes['words_added']} words)")
 
         return {
             'episode_num': episode_num,
             'enhanced_text': enhanced_text,
+            'changes': changes,
+            'original_preview': episode_text[:200] + '...' if len(episode_text) > 200 else episode_text,
             'success': True
         }
 
@@ -989,6 +1050,7 @@ def enhance_episode_with_claude(episode_data):
         return {
             'episode_num': episode_num,
             'enhanced_text': episode_text,  # Return original on failure
+            'changes': None,
             'success': False
         }
 
@@ -1002,20 +1064,30 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
     2. GPT-4o Expansion (parallel per incomplete episode) - already called separately
     3. Claude Enhancement (parallel per episode, limited concurrency)
 
-    Returns: (enhanced_text, stats_dict)
+    Returns: (enhanced_text, stats_dict) where stats_dict includes:
+    - research_count, enhance_count
+    - all_citations: list of all sources found
+    - all_changes: list of change summaries per episode
+    - research_findings: research summaries per episode
     """
     episodes = parse_episodes(text)
     total_episodes = len(episodes)
 
     if total_episodes == 0:
-        return text, {'research_count': 0, 'enhance_count': 0}
+        return text, {'research_count': 0, 'enhance_count': 0, 'all_citations': [], 'all_changes': [], 'research_findings': []}
 
     # Extract speakers for consistency
     speakers = detect_speakers(text)
     if not speakers:
         speakers = ['ALEX', 'SARAH']
 
-    stats = {'research_count': 0, 'enhance_count': 0}
+    stats = {
+        'research_count': 0,
+        'enhance_count': 0,
+        'all_citations': [],
+        'all_changes': [],
+        'research_findings': []
+    }
 
     # Limit concurrent API calls to prevent rate limiting
     research_pool_size = min(MAX_AI_CONCURRENT, total_episodes)
@@ -1033,14 +1105,27 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
         episodes
     ))
 
-    # Build research context map (don't inject into text, pass separately)
+    # Build research context map and collect citations
     research_map = {}
     for result in research_results:
         if result['success']:
             research_map[result['episode_num']] = result['research']
             stats['research_count'] += 1
 
-    logger.info(f"Research complete: {stats['research_count']}/{total_episodes} successful")
+            # Collect citations from this episode
+            for citation in result.get('citations', []):
+                if citation not in stats['all_citations']:
+                    stats['all_citations'].append(citation)
+
+            # Collect research findings summary
+            stats['research_findings'].append({
+                'episode': result['episode_num'],
+                'topic': result.get('topic', ''),
+                'findings_preview': result['research'][:300] + '...' if len(result['research']) > 300 else result['research'],
+                'source_count': len(result.get('citations', []))
+            })
+
+    logger.info(f"Research complete: {stats['research_count']}/{total_episodes} successful, {len(stats['all_citations'])} sources")
 
     # Stage 2: Claude Enhancement - PARALLEL (limited concurrency)
     if progress_callback:
@@ -1060,12 +1145,22 @@ def run_ai_enhancement_pipeline(text, progress_callback=None):
         episodes
     ))
 
-    # Build enhanced text map
+    # Build enhanced text map and collect changes
     enhanced_map = {}
     for result in enhance_results:
         enhanced_map[result['episode_num']] = result['enhanced_text']
         if result['success']:
             stats['enhance_count'] += 1
+
+            # Collect change information
+            if result.get('changes'):
+                stats['all_changes'].append({
+                    'episode': result['episode_num'],
+                    'words_added': result['changes']['words_added'],
+                    'words_removed': result['changes']['words_removed'],
+                    'length_change': result['changes']['length_change'],
+                    'sample_additions': result['changes']['sample_additions'][:3]  # Top 3 additions
+                })
 
     logger.info(f"Enhancement complete: {stats['enhance_count']}/{total_episodes} successful")
 
@@ -1194,16 +1289,36 @@ def generate():
                         # Note: Can't yield from inside callback, just log
                         logger.info(f"Job {job_id}: {msg}")
 
-                    # Send enhance stage update before running
+                    # Run the enhancement pipeline
                     enhanced_text, stats = run_ai_enhancement_pipeline(text, progress_callback)
 
+                    # Send research findings with sources
                     if stats['research_count'] > 0:
+                        # Send research results with citations
+                        research_data = {
+                            'status': 'processing',
+                            'stage': 'research',
+                            'message': f"Found {len(stats['all_citations'])} sources across {stats['research_count']} episodes",
+                            'citations': stats['all_citations'][:15],  # Top 15 sources
+                            'research_findings': stats['research_findings']
+                        }
+                        yield f"data: {json.dumps(research_data)}\n\n"
+
+                        # Send enhance stage with Claude info
                         yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"Polishing dialogue with Claude AI...\"}}\n\n"
 
                     if stats['research_count'] > 0 or stats['enhance_count'] > 0:
-                        yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"AI pipeline complete: researched {stats['research_count']}, enhanced {stats['enhance_count']} episodes\"}}\n\n"
+                        # Send enhancement results with changes
+                        enhance_data = {
+                            'status': 'processing',
+                            'stage': 'enhance',
+                            'message': f"AI pipeline complete: researched {stats['research_count']}, enhanced {stats['enhance_count']} episodes",
+                            'changes': stats['all_changes'],
+                            'total_citations': len(stats['all_citations'])
+                        }
+                        yield f"data: {json.dumps(enhance_data)}\n\n"
                         text = enhanced_text
-                        logger.info(f"Job {job_id}: Enhancement complete: {stats}")
+                        logger.info(f"Job {job_id}: Enhancement complete: {stats['research_count']} researched, {stats['enhance_count']} enhanced, {len(stats['all_citations'])} sources")
                     else:
                         yield f"data: {{\"status\": \"processing\", \"stage\": \"enhance\", \"message\": \"AI enhancement skipped (no episodes detected)\"}}\n\n"
 

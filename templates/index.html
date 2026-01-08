@@ -160,6 +160,50 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- AI Workbench - Real-time Insights -->
+                <div class="ai-workbench">
+                    <!-- Workbench Header with Tabs -->
+                    <div class="workbench-header">
+                        <h3>AI Workbench</h3>
+                        <div class="workbench-tabs">
+                            <button class="tab-btn active" data-tab="activity">Activity</button>
+                            <button class="tab-btn" data-tab="sources">Sources <span id="source-count" class="tab-badge hidden">0</span></button>
+                            <button class="tab-btn" data-tab="changes">Changes <span id="change-count" class="tab-badge hidden">0</span></button>
+                        </div>
+                    </div>
+
+                    <!-- Activity Feed Tab -->
+                    <div class="workbench-panel active" id="activity-panel">
+                        <div class="activity-feed" id="activity-feed">
+                            <div class="activity-item thinking">
+                                <span class="activity-icon">🔄</span>
+                                <span class="activity-text">Initializing pipeline...</span>
+                                <span class="activity-time">now</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sources Tab (Perplexity Citations) -->
+                    <div class="workbench-panel" id="sources-panel">
+                        <div class="sources-list" id="sources-list">
+                            <div class="empty-state">
+                                <span class="empty-icon">🔍</span>
+                                <p>Sources will appear here when Perplexity researches your content</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Changes Tab (Claude Edits) -->
+                    <div class="workbench-panel" id="changes-panel">
+                        <div class="changes-list" id="changes-list">
+                            <div class="empty-state">
+                                <span class="empty-icon">🧠</span>
+                                <p>Claude's enhancements will appear here</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div id="result-section" class="hidden">
@@ -186,6 +230,7 @@
     </div>
 
     <script>
+        // DOM Elements
         const form = document.getElementById('tts-form');
         const fileInput = document.getElementById('file');
         const fileLabel = document.getElementById('file-label');
@@ -200,6 +245,32 @@
         const resultSize = document.getElementById('result-size');
         const errorMessage = document.getElementById('error-message');
         const resultFilename = document.getElementById('result-filename');
+
+        // Workbench elements
+        const activityFeed = document.getElementById('activity-feed');
+        const sourcesList = document.getElementById('sources-list');
+        const changesList = document.getElementById('changes-list');
+        const sourceCountBadge = document.getElementById('source-count');
+        const changeCountBadge = document.getElementById('change-count');
+
+        // Track sources and changes
+        let allSources = [];
+        let allChanges = [];
+        let startTime = null;
+
+        // Workbench tab switching
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                // Update active tab
+                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                // Show corresponding panel
+                const tabName = btn.dataset.tab;
+                document.querySelectorAll('.workbench-panel').forEach(p => p.classList.remove('active'));
+                document.getElementById(tabName + '-panel').classList.add('active');
+            });
+        });
 
         // File input label update
         fileInput.addEventListener('change', function() {
@@ -224,6 +295,10 @@
                 return;
             }
 
+            // Reset workbench state
+            resetWorkbench();
+            startTime = Date.now();
+
             // Show progress and start pipeline animation
             form.classList.add('hidden');
             progressSection.classList.remove('hidden');
@@ -235,6 +310,8 @@
                 initPipeline();
                 startPipeline('analyze');
             }
+
+            addActivity('🚀', 'Pipeline started', 'thinking');
 
             const formData = new FormData(form);
 
@@ -283,6 +360,28 @@
                     updatePipelineStage(data.stage, progress);
                 }
 
+                // Add activity for stage changes
+                const stageIcons = {
+                    'analyze': '📄',
+                    'research': '🔍',
+                    'enhance': '🧠',
+                    'generate': '🎙️',
+                    'combine': '✨'
+                };
+                if (data.stage && stageIcons[data.stage]) {
+                    addActivity(stageIcons[data.stage], data.message, data.stage);
+                }
+
+                // Handle citations from Perplexity
+                if (data.citations && data.citations.length > 0) {
+                    updateSources(data.citations, data.research_findings);
+                }
+
+                // Handle changes from Claude
+                if (data.changes && data.changes.length > 0) {
+                    updateChanges(data.changes);
+                }
+
                 // Update chunk progress for generate stage
                 if (data.total && data.current) {
                     const percent = (data.current / data.total) * 100;
@@ -294,6 +393,8 @@
                 if (typeof stopPipeline === 'function') {
                     stopPipeline();
                 }
+
+                addActivity('✅', 'Audio generated successfully!', 'complete');
 
                 progressSection.classList.add('hidden');
                 resultSection.classList.remove('hidden');
@@ -319,11 +420,146 @@
             }
         }
 
+        function addActivity(icon, text, type = 'info') {
+            const elapsed = startTime ? Math.round((Date.now() - startTime) / 1000) : 0;
+            const timeStr = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed/60)}m ${elapsed%60}s`;
+
+            const item = document.createElement('div');
+            item.className = `activity-item ${type}`;
+            item.innerHTML = `
+                <span class="activity-icon">${icon}</span>
+                <span class="activity-text">${text}</span>
+                <span class="activity-time">${timeStr}</span>
+            `;
+
+            // Add to top of feed
+            activityFeed.insertBefore(item, activityFeed.firstChild);
+
+            // Limit feed length
+            while (activityFeed.children.length > 50) {
+                activityFeed.removeChild(activityFeed.lastChild);
+            }
+        }
+
+        function updateSources(citations, findings) {
+            allSources = [...new Set([...allSources, ...citations])];
+
+            // Update badge
+            sourceCountBadge.textContent = allSources.length;
+            sourceCountBadge.classList.remove('hidden');
+
+            // Update sources panel
+            let html = '<div class="sources-header"><h4>Research Sources</h4><span class="source-total">' + allSources.length + ' sources found</span></div>';
+
+            // Add findings if available
+            if (findings && findings.length > 0) {
+                html += '<div class="findings-section">';
+                findings.forEach(f => {
+                    html += `
+                        <div class="finding-item">
+                            <div class="finding-header">
+                                <span class="finding-episode">Episode ${f.episode}</span>
+                                <span class="finding-sources">${f.source_count} sources</span>
+                            </div>
+                            <div class="finding-topic">${escapeHtml(f.topic)}</div>
+                            <div class="finding-preview">${escapeHtml(f.findings_preview)}</div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+
+            // Add citation URLs
+            html += '<div class="citations-section"><h4>Citation URLs</h4>';
+            allSources.forEach((url, i) => {
+                const domain = extractDomain(url);
+                html += `
+                    <a href="${escapeHtml(url)}" target="_blank" class="citation-link">
+                        <span class="citation-number">${i + 1}</span>
+                        <span class="citation-domain">${domain}</span>
+                        <span class="citation-icon">↗</span>
+                    </a>
+                `;
+            });
+            html += '</div>';
+
+            sourcesList.innerHTML = html;
+
+            // Add activity
+            addActivity('📚', `Found ${allSources.length} research sources`, 'research');
+        }
+
+        function updateChanges(changes) {
+            allChanges = changes;
+
+            // Update badge
+            const totalAdded = changes.reduce((sum, c) => sum + c.words_added, 0);
+            changeCountBadge.textContent = '+' + totalAdded;
+            changeCountBadge.classList.remove('hidden');
+
+            // Update changes panel
+            let html = '<div class="changes-header"><h4>Claude Enhancements</h4></div>';
+
+            changes.forEach(change => {
+                const sign = change.length_change >= 0 ? '+' : '';
+                html += `
+                    <div class="change-item">
+                        <div class="change-header">
+                            <span class="change-episode">Episode ${change.episode}</span>
+                            <span class="change-stats">
+                                <span class="stat-added">+${change.words_added} words</span>
+                                <span class="stat-removed">-${change.words_removed} words</span>
+                                <span class="stat-length">${sign}${change.length_change} chars</span>
+                            </span>
+                        </div>
+                        <div class="change-samples">
+                            <div class="samples-label">Sample additions:</div>
+                            ${change.sample_additions.map(s => `<div class="sample-line">"${escapeHtml(s)}"</div>`).join('')}
+                        </div>
+                    </div>
+                `;
+            });
+
+            changesList.innerHTML = html;
+
+            // Add activity
+            addActivity('✏️', `Claude added ${totalAdded} words across ${changes.length} episodes`, 'enhance');
+        }
+
+        function extractDomain(url) {
+            try {
+                const u = new URL(url);
+                return u.hostname.replace('www.', '');
+            } catch {
+                return url.substring(0, 30);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function resetWorkbench() {
+            allSources = [];
+            allChanges = [];
+            activityFeed.innerHTML = '';
+            sourcesList.innerHTML = '<div class="empty-state"><span class="empty-icon">🔍</span><p>Sources will appear here when Perplexity researches your content</p></div>';
+            changesList.innerHTML = '<div class="empty-state"><span class="empty-icon">🧠</span><p>Claude\'s enhancements will appear here</p></div>';
+            sourceCountBadge.classList.add('hidden');
+            changeCountBadge.classList.add('hidden');
+            chunkFill.style.width = '0%';
+            chunkCount.textContent = '0 / 0 chunks';
+        }
+
         function showError(message) {
             // Stop pipeline animation
             if (typeof stopPipeline === 'function') {
                 stopPipeline();
             }
+
+            addActivity('❌', message, 'error');
 
             progressSection.classList.add('hidden');
             resultSection.classList.add('hidden');
