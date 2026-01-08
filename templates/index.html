@@ -434,10 +434,10 @@
                     downloadLink.download = data.filename;
                 }
                 downloadLink.onclick = function() {
-                    // Cleanup after download starts
+                    // Cleanup after 5 minutes to allow transcript download
                     setTimeout(() => {
                         fetch(`/cleanup/${data.download_id}`, { method: 'POST' });
-                    }, 5000);
+                    }, 300000);
                 };
 
                 // Show transcript download link
