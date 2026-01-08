@@ -193,10 +193,29 @@ def cleanup_old_jobs():
         logger.error(f"Cleanup scheduler error: {e}")
 
 
-# Initialize background scheduler for cleanup (only in main process)
+# Keep-alive ping to prevent Render free tier from sleeping
+def keep_alive_ping():
+    """Ping health endpoint to keep the service awake on Render free tier"""
+    try:
+        # Get the service URL from environment or use default
+        service_url = os.environ.get('RENDER_EXTERNAL_URL', 'https://podcast-tts-web.onrender.com')
+        health_url = f"{service_url}/health"
+
+        response = requests.get(health_url, timeout=30)
+        if response.status_code == 200:
+            logger.info(f"Keep-alive ping successful: {response.status_code}")
+        else:
+            logger.warning(f"Keep-alive ping returned: {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Keep-alive ping failed: {e}")
+
+
+# Initialize background scheduler for cleanup and keep-alive (only in main process)
 scheduler = BackgroundScheduler()
 scheduler.add_job(cleanup_old_jobs, 'interval', hours=1)
+scheduler.add_job(keep_alive_ping, 'interval', minutes=14)  # Ping every 14 min (Render sleeps at 15)
 scheduler.start()
+logger.info("Background scheduler started: cleanup (1h), keep-alive (14m)")
 atexit.register(lambda: scheduler.shutdown(wait=False))
 
 # Script expansion prompt for GPT-4o
