@@ -1039,12 +1039,14 @@ def enhance_episode_with_claude(episode_data):
                 ]
             )
         except (anthropic.NotFoundError, anthropic.BadRequestError) as model_err:
-            # Model not found or bad request - try fallback model
+            # Model not found or bad request - try fallback model with reduced tokens
             logger.warning(f"Episode {episode_num}: Model {model_to_use} failed ({type(model_err).__name__}), trying fallback {CLAUDE_MODEL_FALLBACK}")
             model_to_use = CLAUDE_MODEL_FALLBACK
+            # Haiku has 4096 max output tokens, reduce accordingly
+            fallback_max_tokens = 4096 if 'haiku' in CLAUDE_MODEL_FALLBACK.lower() else 8000
             response = client.messages.create(
                 model=model_to_use,
-                max_tokens=8000,
+                max_tokens=fallback_max_tokens,
                 messages=[
                     {
                         "role": "user",
