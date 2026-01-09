@@ -43,6 +43,7 @@ from gevent.pool import Pool as GeventPool
 from gevent.lock import RLock
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from apscheduler.schedulers.background import BackgroundScheduler
+from job_store import job_store, Job, JobStatus, Stage, StageResult
 
 # Configure logging (structured format)
 logging.basicConfig(
@@ -953,7 +954,7 @@ def parse_episodes(text):
     return episodes
 
 
-def expand_script_with_ai(outline_text, context="", speakers=None):
+def expand_script_with_ai(outline_text, context="", speakers=None, research_context=""):
     """
     Use GPT-4o to expand an episode outline into full podcast dialogue.
     Always uses ALEX (male host) and SARAH (female expert) for conversational format.
@@ -962,6 +963,7 @@ def expand_script_with_ai(outline_text, context="", speakers=None):
         outline_text: The incomplete episode outline
         context: Text from previous complete episodes for style matching
         speakers: Ignored - always uses ALEX and SARAH for consistency
+        research_context: Research findings from Perplexity to incorporate into dialogue
 
     Returns:
         Expanded dialogue script with ALEX and SARAH speakers
@@ -977,7 +979,17 @@ def expand_script_with_ai(outline_text, context="", speakers=None):
         # Limit context to last ~2000 chars to avoid token limits
         context_snippet = f"\n\nStyle reference from previous episodes:\n{context[-2000:]}"
 
-    user_prompt = f"""Expand this episode outline into a full podcast dialogue script:{speaker_info}{context_snippet}
+    # Add research findings if available
+    research_section = ""
+    if research_context:
+        research_section = f"""
+
+RESEARCH FINDINGS TO INCORPORATE:
+{research_context}
+
+Use these facts, statistics, and insights naturally in the dialogue. Have SARAH cite specific data points and ALEX react with interest."""
+
+    user_prompt = f"""Expand this episode outline into a full podcast dialogue script:{speaker_info}{context_snippet}{research_section}
 
 EPISODE TO EXPAND:
 {outline_text}
@@ -1000,28 +1012,81 @@ Write the complete dialogue now:"""
         raise
 
 
+def research_outline_with_perplexity(outline_text, episode_num=1):
+    """
+    Research an outline topic using Perplexity BEFORE expansion.
+    Lighter-weight than full episode research - focused on getting key facts.
+
+    Args:
+        outline_text: The episode outline/topic to research
+        episode_num: Episode number for tracking
+
+    Returns:
+        Dict with research content, citations, success status, and episode_num
+    """
+    if not PERPLEXITY_API_KEY:
+        logger.debug(f"Episode {episode_num}: No Perplexity API key, skipping pre-expansion research")
+        return {'research': '', 'citations': [], 'success': False, 'episode_num': episode_num}
+
+    try:
+        perplexity_rate_limiter.wait_if_needed()
+
+        response = requests.post(
+            "https://api.perplexity.ai/chat/completions",
+            headers={
+                "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "sonar-pro",
+                "messages": [
+                    {"role": "system", "content": "You are a research assistant for podcast content. Provide key facts, recent statistics, expert insights, and compelling information. Be concise but informative. Focus on surprising, specific, or noteworthy details that will make the podcast engaging."},
+                    {"role": "user", "content": f"Research this podcast topic and provide 5-8 key facts, statistics, or insights:\n\n{outline_text[:1500]}"}
+                ],
+                "temperature": 0.3,
+                "max_tokens": 800,
+                "return_citations": True
+            },
+            timeout=60
+        )
+
+        if response.status_code == 200:
+            response_json = response.json()
+            research = response_json['choices'][0]['message']['content']
+            citations = response_json.get('citations', [])
+            logger.info(f"Episode {episode_num}: Pre-expansion research found {len(citations)} sources")
+            return {'research': research, 'citations': citations, 'success': True, 'episode_num': episode_num}
+        else:
+            logger.warning(f"Episode {episode_num}: Perplexity returned {response.status_code}")
+            return {'research': '', 'citations': [], 'success': False, 'episode_num': episode_num}
+    except Exception as e:
+        logger.error(f"Episode {episode_num}: Pre-expansion research failed: {e}")
+        return {'research': '', 'citations': [], 'success': False, 'episode_num': episode_num}
+
+
 def auto_expand_script(text, progress_callback=None):
     """
     Automatically detect and expand incomplete episodes in a script.
+    Now runs Perplexity research FIRST to inform expansion with facts.
 
     Args:
         text: Full script text
         progress_callback: Optional function to call with progress updates
 
     Returns:
-        Tuple of (expanded_text, expansion_count)
+        Tuple of (expanded_text, expansion_count, all_citations)
     """
     episodes = parse_episodes(text)
 
     if not episodes or all(ep['is_complete'] for ep in episodes):
-        return text, 0
+        return text, 0, []
 
     # Find incomplete episodes
     incomplete = [ep for ep in episodes if not ep['is_complete']]
     complete = [ep for ep in episodes if ep['is_complete']]
 
     if not incomplete:
-        return text, 0
+        return text, 0, []
 
     # Extract speakers from complete episodes for consistency
     speakers = detect_speakers('\n'.join(ep['text'] for ep in complete))
@@ -1031,7 +1096,33 @@ def auto_expand_script(text, progress_callback=None):
     # Build context from complete episodes
     context = '\n\n'.join(ep['text'] for ep in complete[:3])  # Use first 3 complete episodes
 
-    # Expand each incomplete episode
+    # ===== RESEARCH PHASE: Get facts for each incomplete episode FIRST =====
+    all_citations = []
+    research_map = {}
+
+    if PERPLEXITY_API_KEY:
+        if progress_callback:
+            progress_callback(f"Researching {len(incomplete)} episode(s) before expansion...")
+
+        logger.info(f"Starting pre-expansion research for {len(incomplete)} episodes")
+
+        # Research all incomplete episodes in parallel
+        research_pool = GeventPool(size=min(5, len(incomplete)))
+        research_results = list(research_pool.imap_unordered(
+            lambda ep: research_outline_with_perplexity(ep['text'], ep['episode_num']),
+            incomplete
+        ))
+
+        # Process research results
+        for result in research_results:
+            if result['success']:
+                research_map[result['episode_num']] = result['research']
+                all_citations.extend(result.get('citations', []))
+                logger.info(f"Episode {result['episode_num']}: Research ready ({len(result['research'])} chars)")
+
+        logger.info(f"Pre-expansion research complete: {len(research_map)} episodes researched, {len(all_citations)} citations")
+
+    # ===== EXPANSION PHASE: Expand WITH research context =====
     expanded_episodes = {}
     for i, ep in enumerate(incomplete):
         if progress_callback:
@@ -1039,10 +1130,19 @@ def auto_expand_script(text, progress_callback=None):
 
         logger.info(f"Expanding Episode {ep['episode_num']}...")
 
+        # Get research for this episode (if available)
+        episode_research = research_map.get(ep['episode_num'], '')
+
         try:
-            expanded_text = expand_script_with_ai(ep['text'], context, speakers)
+            expanded_text = expand_script_with_ai(
+                ep['text'],
+                context,
+                speakers,
+                research_context=episode_research  # Pass research to expansion!
+            )
             expanded_episodes[ep['episode_num']] = expanded_text
-            logger.info(f"Episode {ep['episode_num']} expanded ({len(expanded_text)} chars)")
+            research_note = f" (with {len(episode_research)} chars research)" if episode_research else ""
+            logger.info(f"Episode {ep['episode_num']} expanded ({len(expanded_text)} chars){research_note}")
         except Exception as e:
             logger.error(f"Failed to expand Episode {ep['episode_num']}: {e}")
             # Keep original text on failure
@@ -1063,7 +1163,7 @@ def auto_expand_script(text, progress_callback=None):
         else:
             result_parts.append(ep['text'])
 
-    return '\n\n'.join(result_parts), len(incomplete)
+    return '\n\n'.join(result_parts), len(incomplete), all_citations
 
 
 # ============== Multi-AI Enhancement Pipeline ==============
@@ -1501,6 +1601,10 @@ def generate():
             if model not in MODELS:
                 model = 'tts-1-hd'
 
+            # Track expansion state for skipping duplicate research
+            expansion_citations = []
+            expanded_count = 0
+
             # Auto-expand incomplete episodes if enabled
             if auto_expand:
                 yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Analyzing script for incomplete sections...\"}}\n\n"
@@ -1510,14 +1614,17 @@ def generate():
                 incomplete_count = sum(1 for ep in episodes if not ep['is_complete'])
 
                 if incomplete_count > 0:
-                    yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Found {incomplete_count} incomplete episode(s). Expanding with AI...\"}}\n\n"
-                    logger.info(f"Job {job_id}: Found {incomplete_count} incomplete episodes, expanding...")
+                    yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Researching {incomplete_count} episode(s) before expansion...\"}}\n\n"
+                    logger.info(f"Job {job_id}: Found {incomplete_count} incomplete episodes, researching then expanding...")
 
                     try:
-                        # Expand incomplete episodes
-                        text, expanded_count = auto_expand_script(text)
-                        yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Expanded {expanded_count} episode(s). Continuing...\"}}\n\n"
-                        logger.info(f"Job {job_id}: Expansion complete, {expanded_count} episodes expanded")
+                        # Research FIRST, then expand with research context (new pipeline order!)
+                        text, expanded_count, expansion_citations = auto_expand_script(text)
+
+                        # Show research + expansion results
+                        research_msg = f" with {len(expansion_citations)} sources" if expansion_citations else ""
+                        yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Expanded {expanded_count} episode(s){research_msg}. Continuing...\"}}\n\n"
+                        logger.info(f"Job {job_id}: Expansion complete, {expanded_count} episodes expanded, {len(expansion_citations)} citations from pre-research")
                     except Exception as e:
                         yield f"data: {{\"status\": \"processing\", \"stage\": \"analyze\", \"message\": \"Script expansion failed: {str(e)}. Continuing with original text...\"}}\n\n"
                         logger.error(f"Job {job_id}: Expansion failed: {e}")
@@ -1564,58 +1671,66 @@ def generate():
                         research_map = {}
 
                         # ===== STAGE 1: PERPLEXITY RESEARCH (PARALLEL with scaled agents) =====
-                        research_pool_size = min(scaling['perplexity_agents'], total_episodes)
-                        research_start = time.time()
-                        yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Starting Perplexity research with {research_pool_size} parallel agents...\"}}\n\n"
-                        logger.info(f"Job {job_id}: Starting Perplexity research for {total_episodes} episodes ({research_pool_size} parallel)")
+                        # Skip if expansion already did research (facts are already in the dialogue!)
+                        if expanded_count > 0 and expansion_citations:
+                            # Research was already done during expansion - skip duplicate research
+                            all_citations = expansion_citations
+                            yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Research completed during expansion ({len(expansion_citations)} sources). Proceeding to Claude enhancement...\"}}\n\n"
+                            logger.info(f"Job {job_id}: Skipping Perplexity research (already done during expansion with {len(expansion_citations)} citations)")
+                        else:
+                            # Run full Perplexity research (content wasn't expanded, or no research during expansion)
+                            research_pool_size = min(scaling['perplexity_agents'], total_episodes)
+                            research_start = time.time()
+                            yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Starting Perplexity research with {research_pool_size} parallel agents...\"}}\n\n"
+                            logger.info(f"Job {job_id}: Starting Perplexity research for {total_episodes} episodes ({research_pool_size} parallel)")
 
-                        # Run all research requests in parallel
-                        research_pool = GeventPool(size=research_pool_size)
-                        research_results = list(research_pool.imap_unordered(
-                            research_episode_with_perplexity,
-                            episodes
-                        ))
+                            # Run all research requests in parallel
+                            research_pool = GeventPool(size=research_pool_size)
+                            research_results = list(research_pool.imap_unordered(
+                                research_episode_with_perplexity,
+                                episodes
+                            ))
 
-                        # Process results and send updates
-                        completed = 0
-                        for result in research_results:
-                            completed += 1
-                            ep_num = result.get('episode_num', 0)
+                            # Process results and send updates
+                            completed = 0
+                            for result in research_results:
+                                completed += 1
+                                ep_num = result.get('episode_num', 0)
 
-                            if result['success']:
-                                research_map[ep_num] = result['research']
+                                if result['success']:
+                                    research_map[ep_num] = result['research']
 
-                                # Collect citations (filter out generic AI sites)
-                                for citation in result.get('citations', []):
-                                    # Skip generic AI company sites
-                                    skip_domains = ['anthropic.com', 'claude.ai', 'openai.com', 'perplexity.ai', 'google.com', 'bing.com']
-                                    if not any(domain in citation.lower() for domain in skip_domains):
-                                        if citation not in all_citations:
-                                            all_citations.append(citation)
+                                    # Collect citations (filter out generic AI sites)
+                                    for citation in result.get('citations', []):
+                                        # Skip generic AI company sites
+                                        skip_domains = ['anthropic.com', 'claude.ai', 'openai.com', 'perplexity.ai', 'google.com', 'bing.com']
+                                        if not any(domain in citation.lower() for domain in skip_domains):
+                                            if citation not in all_citations:
+                                                all_citations.append(citation)
 
-                                # Collect findings
-                                topic = result.get('topic', f'Episode {ep_num}')
-                                research_findings.append({
-                                    'episode': ep_num,
-                                    'topic': topic,
-                                    'findings_preview': result['research'][:300] + '...' if len(result['research']) > 300 else result['research'],
-                                    'source_count': len(result.get('citations', []))
-                                })
+                                    # Collect findings
+                                    topic = result.get('topic', f'Episode {ep_num}')
+                                    research_findings.append({
+                                        'episode': ep_num,
+                                        'topic': topic,
+                                        'findings_preview': result['research'][:300] + '...' if len(result['research']) > 300 else result['research'],
+                                        'source_count': len(result.get('citations', []))
+                                    })
 
-                                # Send update with sources found
-                                yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Episode {ep_num}: Found {len(result.get('citations', []))} sources\", \"current\": {completed}, \"total\": {total_episodes}}}\n\n"
+                                    # Send update with sources found
+                                    yield f"data: {{\"status\": \"processing\", \"stage\": \"research\", \"message\": \"Episode {ep_num}: Found {len(result.get('citations', []))} sources\", \"current\": {completed}, \"total\": {total_episodes}}}\n\n"
 
-                        # Send research complete with all citations and timing
-                        research_time = time.time() - research_start
-                        if all_citations:
-                            research_data = {
-                                'status': 'processing',
-                                'stage': 'research',
-                                'message': f"Research complete in {research_time:.1f}s: {len(all_citations)} quality sources found ({total_episodes/max(research_time, 0.1):.1f} eps/sec)",
-                                'citations': all_citations[:15],
-                                'research_findings': research_findings
-                            }
-                            yield f"data: {json.dumps(research_data)}\n\n"
+                            # Send research complete with all citations and timing
+                            research_time = time.time() - research_start
+                            if all_citations:
+                                research_data = {
+                                    'status': 'processing',
+                                    'stage': 'research',
+                                    'message': f"Research complete in {research_time:.1f}s: {len(all_citations)} quality sources found ({total_episodes/max(research_time, 0.1):.1f} eps/sec)",
+                                    'citations': all_citations[:15],
+                                    'research_findings': research_findings
+                                }
+                                yield f"data: {json.dumps(research_data)}\n\n"
 
                         # ===== STAGE 2: CLAUDE ENHANCEMENT (PARALLEL with scaled agents) =====
                         enhance_pool_size = min(scaling['claude_agents'], total_episodes)
@@ -1908,6 +2023,658 @@ def health():
         'checks': checks,
         'timestamp': datetime.utcnow().isoformat()
     }), 200 if core_healthy else 503
+
+
+# ============== Interactive Pipeline API ==============
+# Allows users to pause between stages and provide suggestions
+
+MIN_RESEARCH_AGENTS = 5  # Always spawn at least 5 parallel Perplexity agents
+
+
+def research_episode_parallel(episode_data: dict, user_suggestion: str = "") -> dict:
+    """
+    Research a single episode with MULTIPLE parallel Perplexity agents.
+    Each agent researches a different angle for comprehensive coverage.
+
+    Args:
+        episode_data: Episode dict with 'text', 'header', 'episode_num'
+        user_suggestion: Optional user guidance to focus research
+
+    Returns:
+        Dict with combined research, citations, agent count
+    """
+    episode_num = episode_data.get('episode_num', 0)
+    episode_text = episode_data.get('text', '')
+    header = episode_data.get('header', '')
+    topic = header if header else episode_text[:500]
+
+    if not PERPLEXITY_API_KEY:
+        logger.debug(f"Episode {episode_num}: No Perplexity API key")
+        return {'episode_num': episode_num, 'research': '', 'citations': [], 'success': False, 'agent_count': 0}
+
+    # Generate multiple research angles
+    research_angles = [
+        f"Key statistics and quantitative data about: {topic}",
+        f"Recent news and developments (2024-2025) about: {topic}",
+        f"Expert opinions and analysis on: {topic}",
+        f"Real-world examples and case studies of: {topic}",
+        f"Common misconceptions or surprising facts about: {topic}",
+    ]
+
+    # Add user suggestion as additional focus if provided
+    if user_suggestion:
+        research_angles.append(f"{user_suggestion} regarding: {topic}")
+        logger.info(f"Episode {episode_num}: Added user focus - {user_suggestion[:50]}...")
+
+    def query_single_angle(angle: str) -> dict:
+        """Query Perplexity for a single research angle"""
+        try:
+            perplexity_rate_limiter.wait_if_needed()
+            response = requests.post(
+                "https://api.perplexity.ai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "sonar-pro",
+                    "messages": [
+                        {"role": "system", "content": "You are a research assistant for podcast content. Provide concise, factual information with specific data points, statistics, and expert insights. Be informative but brief."},
+                        {"role": "user", "content": angle}
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 600,
+                    "return_citations": True
+                },
+                timeout=60
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    'content': data['choices'][0]['message']['content'],
+                    'citations': data.get('citations', []),
+                    'success': True
+                }
+        except Exception as e:
+            logger.error(f"Research angle failed: {e}")
+        return {'content': '', 'citations': [], 'success': False}
+
+    # Run ALL angles in parallel
+    pool = GeventPool(size=len(research_angles))
+    results = list(pool.imap_unordered(query_single_angle, research_angles))
+
+    # Combine results
+    combined_research = []
+    all_citations = []
+    successful = 0
+
+    for result in results:
+        if result['success']:
+            combined_research.append(result['content'])
+            all_citations.extend(result['citations'])
+            successful += 1
+
+    # Deduplicate citations
+    unique_citations = list(dict.fromkeys(all_citations))
+
+    logger.info(f"Episode {episode_num}: {successful}/{len(research_angles)} research agents succeeded, {len(unique_citations)} unique citations")
+
+    return {
+        'episode_num': episode_num,
+        'research': '\n\n---\n\n'.join(combined_research),
+        'citations': unique_citations,
+        'success': successful > 0,
+        'agent_count': len(research_angles)
+    }
+
+
+def run_stage_analyze(job: Job) -> StageResult:
+    """Analyze stage - detect episodes, check completeness"""
+    text = job.text
+    suggestion = job.user_suggestions.get(Stage.ANALYZE, '')
+
+    # Parse episodes
+    episodes = parse_episodes(text)
+    job.episodes = episodes
+
+    incomplete_count = sum(1 for ep in episodes if not ep['is_complete'])
+    complete_count = len(episodes) - incomplete_count
+
+    # Build preview for user review
+    preview_lines = [
+        f"Detected {len(episodes)} episode(s):",
+        f"  - {complete_count} complete (ready for processing)",
+        f"  - {incomplete_count} incomplete (will be expanded)",
+        "",
+        "Episodes found:"
+    ]
+
+    for ep in episodes[:5]:  # Show first 5
+        status = "Complete" if ep['is_complete'] else "Needs expansion"
+        header = ep.get('header', f"Episode {ep['episode_num']}")[:60]
+        preview_lines.append(f"  {ep['episode_num']}. {header}... [{status}]")
+
+    if len(episodes) > 5:
+        preview_lines.append(f"  ... and {len(episodes) - 5} more")
+
+    return StageResult(
+        stage=Stage.ANALYZE,
+        output_preview='\n'.join(preview_lines),
+        full_output={'episodes': episodes, 'text': text},
+        metadata={
+            'episode_count': len(episodes),
+            'incomplete_count': incomplete_count,
+            'complete_count': complete_count
+        }
+    )
+
+
+def run_stage_research(job: Job) -> StageResult:
+    """Research stage - parallel multi-agent Perplexity research"""
+    episodes = job.episodes
+    suggestion = job.user_suggestions.get(Stage.RESEARCH, '')
+
+    if not episodes:
+        return StageResult(
+            stage=Stage.RESEARCH,
+            output_preview="No episodes to research.",
+            full_output={'research_map': {}},
+            metadata={'agent_count': 0}
+        )
+
+    # Research all episodes with multiple parallel agents EACH
+    all_citations = []
+    research_map = {}
+    total_agents = 0
+
+    preview_lines = [f"Research complete using {MIN_RESEARCH_AGENTS}+ parallel agents per episode:\n"]
+
+    # Research each episode (in parallel across episodes too)
+    episode_pool = GeventPool(size=min(5, len(episodes)))
+    research_results = list(episode_pool.imap_unordered(
+        lambda ep: research_episode_parallel(ep, suggestion),
+        episodes
+    ))
+
+    for result in research_results:
+        ep_num = result['episode_num']
+        if result['success']:
+            research_map[ep_num] = result['research']
+            all_citations.extend(result['citations'])
+            total_agents += result['agent_count']
+
+            preview_lines.append(f"Episode {ep_num}: {len(result['citations'])} sources found")
+            # Show snippet of findings
+            snippet = result['research'][:200].replace('\n', ' ')
+            preview_lines.append(f"  Key finding: {snippet}...\n")
+
+    # Store in job
+    job.research_map = research_map
+
+    # Deduplicate citations
+    unique_citations = list(dict.fromkeys(all_citations))
+
+    preview_lines.insert(1, f"Total: {len(unique_citations)} unique sources across {total_agents} research queries\n")
+
+    return StageResult(
+        stage=Stage.RESEARCH,
+        output_preview='\n'.join(preview_lines),
+        full_output={'research_map': research_map},
+        citations=unique_citations[:20],  # Top 20 for preview
+        metadata={
+            'total_agents': total_agents,
+            'episodes_researched': len(research_map),
+            'total_citations': len(unique_citations)
+        }
+    )
+
+
+def run_stage_expand(job: Job) -> StageResult:
+    """Expansion stage - GPT-4o expands outlines with research context"""
+    episodes = job.episodes
+    research_map = job.research_map
+    suggestion = job.user_suggestions.get(Stage.EXPAND, '')
+
+    incomplete = [ep for ep in episodes if not ep['is_complete']]
+
+    if not incomplete:
+        # All complete, skip expansion
+        final_text = '\n\n'.join(ep['text'] for ep in episodes)
+        job.final_text = final_text
+        return StageResult(
+            stage=Stage.EXPAND,
+            output_preview="All episodes already complete. No expansion needed.",
+            full_output={'expanded_text': final_text},
+            metadata={'expanded_count': 0}
+        )
+
+    expanded_map = {}
+    preview_lines = [f"Expanding {len(incomplete)} incomplete episode(s):\n"]
+
+    for ep in incomplete:
+        ep_num = ep['episode_num']
+        research_context = research_map.get(ep_num, '')
+
+        # Add user suggestion to expansion context
+        style_guidance = ""
+        if suggestion:
+            style_guidance = f"\n\nUSER GUIDANCE: {suggestion}"
+
+        try:
+            expanded = expand_script_with_ai(
+                ep['text'],
+                context="",
+                speakers=['ALEX', 'SARAH'],
+                research_context=research_context + style_guidance
+            )
+            expanded_map[ep_num] = expanded
+            preview_lines.append(f"Episode {ep_num}: Expanded to {len(expanded)} chars")
+            # Show dialogue preview
+            lines = expanded.split('\n')[:3]
+            for line in lines:
+                if line.strip():
+                    preview_lines.append(f"  {line[:80]}...")
+            preview_lines.append("")
+        except Exception as e:
+            logger.error(f"Expansion failed for episode {ep_num}: {e}")
+            expanded_map[ep_num] = ep['text']
+            preview_lines.append(f"Episode {ep_num}: Expansion failed, using original")
+
+    # Rebuild full text
+    result_parts = []
+    for ep in episodes:
+        if ep['episode_num'] in expanded_map:
+            header = ep['header']
+            expanded = expanded_map[ep['episode_num']]
+            if not expanded.strip().upper().startswith(header.strip().upper()[:20]):
+                result_parts.append(f"{header}\n\n{expanded}")
+            else:
+                result_parts.append(expanded)
+        else:
+            result_parts.append(ep['text'])
+
+    final_text = '\n\n'.join(result_parts)
+    job.final_text = final_text
+    job.enhanced_map = expanded_map
+
+    return StageResult(
+        stage=Stage.EXPAND,
+        output_preview='\n'.join(preview_lines),
+        full_output={'expanded_text': final_text, 'expanded_map': expanded_map},
+        metadata={'expanded_count': len(expanded_map)}
+    )
+
+
+def run_stage_enhance(job: Job) -> StageResult:
+    """Enhancement stage - Claude polishes dialogue"""
+    text = job.final_text
+    episodes = parse_episodes(text)
+    research_map = job.research_map
+    suggestion = job.user_suggestions.get(Stage.ENHANCE, '')
+
+    if not CLAUDE_API_KEY:
+        return StageResult(
+            stage=Stage.ENHANCE,
+            output_preview="Claude API not configured. Skipping enhancement.",
+            full_output={'enhanced_text': text},
+            metadata={'enhanced': False}
+        )
+
+    all_changes = []
+    enhanced_map = {}
+    preview_lines = ["Claude enhancement complete:\n"]
+
+    # Enhance each episode
+    for ep in episodes:
+        ep_num = ep['episode_num']
+        research = research_map.get(ep_num, '')
+
+        # Add user style guidance
+        style_guidance = suggestion if suggestion else ""
+
+        result = enhance_episode_with_claude({
+            'episode_num': ep_num,
+            'text': ep['text'],
+            'research': research,
+            'speakers': ['ALEX', 'SARAH'],
+            'style_guidance': style_guidance
+        })
+
+        enhanced_map[ep_num] = result['enhanced_text']
+
+        if result['success'] and result.get('changes'):
+            changes = result['changes']
+            all_changes.append({
+                'episode': ep_num,
+                'words_added': changes['words_added'],
+                'words_removed': changes['words_removed'],
+                'sample_additions': changes['sample_additions'][:2]
+            })
+            preview_lines.append(f"Episode {ep_num}: +{changes['words_added']} words")
+            for sample in changes['sample_additions'][:1]:
+                preview_lines.append(f"  \"{sample[:60]}...\"")
+
+    # Rebuild text
+    result_parts = []
+    for ep in episodes:
+        ep_num = ep['episode_num']
+        if ep_num in enhanced_map:
+            clean = re.sub(r'\[RESEARCH[^\]]*\].*?\[END[^\]]*\]', '', enhanced_map[ep_num], flags=re.DOTALL)
+            result_parts.append(clean.strip())
+        else:
+            result_parts.append(ep['text'])
+
+    final_text = '\n\n'.join(result_parts)
+    job.final_text = final_text
+
+    total_added = sum(c['words_added'] for c in all_changes)
+    preview_lines.insert(1, f"Total: +{total_added} words across {len(all_changes)} episodes\n")
+
+    return StageResult(
+        stage=Stage.ENHANCE,
+        output_preview='\n'.join(preview_lines),
+        full_output={'enhanced_text': final_text},
+        changes=all_changes,
+        metadata={'total_words_added': total_added, 'episodes_enhanced': len(all_changes)}
+    )
+
+
+def run_stage_generate(job: Job) -> StageResult:
+    """Generate stage - TTS audio generation"""
+    text = job.final_text
+    job_id = job.id
+    job_dir = TEMP_DIR / job_id
+    job_dir.mkdir(exist_ok=True)
+
+    # Preprocess text
+    processed = preprocess_text(text)
+
+    # Split into chunks
+    if job.multi_voice:
+        speakers = detect_speakers(processed)
+        if not speakers:
+            speakers = ['ALEX', 'SARAH']
+        voice_assignments = assign_voices_to_speakers(speakers)
+        chunks = split_by_speaker(processed, voice_assignments, job.voice)
+    else:
+        chunks = split_into_chunks(processed)
+        chunks = [(chunk, job.voice, None) for chunk in chunks]
+
+    total_chunks = len(chunks)
+    preview_lines = [f"Audio generation complete:\n"]
+    preview_lines.append(f"  - {total_chunks} audio chunks generated")
+
+    # Generate TTS (simplified for interactive mode - runs synchronously)
+    chunk_files = []
+    for idx, (chunk_text, chunk_voice, speaker) in enumerate(chunks):
+        output_path = job_dir / f"chunk_{idx:04d}.mp3"
+        try:
+            generate_tts_audio(chunk_text, chunk_voice, job.model, output_path)
+            chunk_files.append(output_path)
+        except Exception as e:
+            logger.error(f"TTS chunk {idx} failed: {e}")
+
+    preview_lines.append(f"  - {len(chunk_files)} chunks successful")
+
+    if job.multi_voice:
+        preview_lines.append(f"  - Multi-voice: ALEX (echo) + SARAH (shimmer)")
+
+    return StageResult(
+        stage=Stage.GENERATE,
+        output_preview='\n'.join(preview_lines),
+        full_output={'chunk_files': chunk_files, 'total_chunks': total_chunks},
+        metadata={'total_chunks': total_chunks, 'successful_chunks': len(chunk_files)}
+    )
+
+
+def run_stage_combine(job: Job) -> StageResult:
+    """Combine stage - concatenate audio and save transcript"""
+    job_id = job.id
+    job_dir = TEMP_DIR / job_id
+
+    generate_result = job.stage_results.get(Stage.GENERATE)
+    if not generate_result:
+        return StageResult(
+            stage=Stage.COMBINE,
+            output_preview="No audio chunks to combine.",
+            full_output={},
+            metadata={'success': False}
+        )
+
+    chunk_files = generate_result.full_output.get('chunk_files', [])
+
+    # Concatenate MP3s
+    output_path = job_dir / "podcast.mp3"
+    concatenate_mp3_files(chunk_files, output_path)
+
+    # Save transcript
+    transcript_path = job_dir / 'transcript.txt'
+    with open(transcript_path, 'w', encoding='utf-8') as f:
+        f.write(f"# Podcast Transcript\n")
+        f.write(f"# Generated: {datetime.now().isoformat()}\n")
+        f.write(f"# Hosts: ALEX (male) and SARAH (female)\n")
+        f.write(f"# Job ID: {job_id}\n\n")
+        f.write(job.final_text)
+
+    size_mb = output_path.stat().st_size / (1024 * 1024) if output_path.exists() else 0
+    smart_filename = generate_smart_filename(job.final_text)
+
+    job.download_id = job_id
+    job.transcript_id = job_id
+
+    preview_lines = [
+        "Pipeline complete!",
+        "",
+        f"Audio: {size_mb:.1f} MB",
+        f"Filename: {smart_filename}",
+        "",
+        "Ready for download."
+    ]
+
+    return StageResult(
+        stage=Stage.COMBINE,
+        output_preview='\n'.join(preview_lines),
+        full_output={'output_path': str(output_path), 'transcript_path': str(transcript_path)},
+        metadata={'size_mb': size_mb, 'filename': smart_filename}
+    )
+
+
+def run_job_stage(job_id: str, stage: Stage):
+    """Background worker to run a single pipeline stage"""
+    job = job_store.get_job(job_id)
+    if not job:
+        logger.error(f"Job {job_id} not found")
+        return
+
+    job.current_stage = stage
+    job.status = JobStatus.RUNNING
+    job_store.update_job(job)
+
+    logger.info(f"Job {job_id}: Starting stage {stage.value}")
+
+    try:
+        # Run appropriate stage processor
+        if stage == Stage.ANALYZE:
+            result = run_stage_analyze(job)
+        elif stage == Stage.RESEARCH:
+            result = run_stage_research(job)
+        elif stage == Stage.EXPAND:
+            result = run_stage_expand(job)
+        elif stage == Stage.ENHANCE:
+            result = run_stage_enhance(job)
+        elif stage == Stage.GENERATE:
+            result = run_stage_generate(job)
+        elif stage == Stage.COMBINE:
+            result = run_stage_combine(job)
+        else:
+            raise ValueError(f"Unknown stage: {stage}")
+
+        # Store result
+        job.stage_results[stage] = result
+
+        # Determine next state
+        if stage == Stage.COMBINE:
+            job.status = JobStatus.COMPLETE
+            logger.info(f"Job {job_id}: Pipeline complete")
+        else:
+            job.status = JobStatus.PAUSED_FOR_REVIEW
+            logger.info(f"Job {job_id}: Paused for review after {stage.value}")
+
+        job_store.update_job(job)
+
+    except Exception as e:
+        logger.error(f"Job {job_id}: Stage {stage.value} failed: {e}")
+        job.status = JobStatus.ERROR
+        job.error_message = str(e)
+        job_store.update_job(job)
+
+
+@app.route('/api/job', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def create_interactive_job():
+    """Create a new interactive pipeline job"""
+    # Extract request data
+    if 'file' in request.files and request.files['file'].filename:
+        file = request.files['file']
+        text, error = validate_file_upload(file)
+        if error:
+            return jsonify({'error': error}), 400
+    else:
+        text = request.form.get('text', '')
+
+    if not text.strip():
+        return jsonify({'error': 'No text provided'}), 400
+
+    if len(text) > MAX_TEXT_LENGTH:
+        return jsonify({'error': f'Text too large. Maximum {MAX_TEXT_LENGTH//(1024*1024)}MB allowed.'}), 400
+
+    # Create job
+    job = Job(
+        id=generate_job_id(),
+        status=JobStatus.CREATED,
+        current_stage=None,
+        text=text,
+        voice=request.form.get('voice', 'nova'),
+        model=request.form.get('model', 'tts-1-hd'),
+        multi_voice=request.form.get('multi_voice', 'true').lower() == 'true',
+        ai_enhance=request.form.get('ai_enhance', 'true').lower() == 'true',
+        auto_expand=request.form.get('auto_expand', 'true').lower() == 'true'
+    )
+
+    job_store.create_job(job)
+    logger.info(f"Job {job.id}: Created interactive pipeline job")
+
+    # Start first stage in background
+    gevent.spawn(run_job_stage, job.id, Stage.ANALYZE)
+
+    return jsonify({
+        'job_id': job.id,
+        'status': 'created',
+        'message': 'Pipeline started. Poll /api/job/{job_id}/status for updates.'
+    })
+
+
+@app.route('/api/job/<job_id>/status')
+@login_required
+def get_interactive_job_status(job_id):
+    """Get current job status and stage preview if paused"""
+    job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
+    job = job_store.get_job(job_id)
+
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    response = {
+        'job_id': job.id,
+        'status': job.status.value,
+        'current_stage': job.current_stage.value if job.current_stage else None,
+        'current_stage_name': Stage.get_display_name(job.current_stage) if job.current_stage else None,
+        'awaiting_input': job.status == JobStatus.PAUSED_FOR_REVIEW
+    }
+
+    # Include stage preview if paused for review
+    if job.status == JobStatus.PAUSED_FOR_REVIEW and job.current_stage:
+        preview = job.get_stage_preview()
+        if preview:
+            response['stage_preview'] = preview['preview']
+            response['citations'] = preview.get('citations', [])
+            response['changes'] = preview.get('changes', [])
+            response['metadata'] = preview.get('metadata', {})
+
+    # Include download info if complete
+    if job.status == JobStatus.COMPLETE:
+        response['download_id'] = job.download_id
+        response['transcript_id'] = job.transcript_id
+        combine_result = job.stage_results.get(Stage.COMBINE)
+        if combine_result:
+            response['filename'] = combine_result.metadata.get('filename', 'podcast.mp3')
+            response['size_mb'] = combine_result.metadata.get('size_mb', 0)
+
+    # Include error if failed
+    if job.status == JobStatus.ERROR:
+        response['error_message'] = job.error_message
+
+    return jsonify(response)
+
+
+@app.route('/api/job/<job_id>/continue', methods=['POST'])
+@login_required
+def continue_interactive_job(job_id):
+    """Continue pipeline with optional user suggestion"""
+    job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
+    job = job_store.get_job(job_id)
+
+    if not job:
+        return jsonify({'error': 'Job not found'}), 404
+
+    if job.status != JobStatus.PAUSED_FOR_REVIEW:
+        return jsonify({'error': 'Job not awaiting input', 'current_status': job.status.value}), 400
+
+    # Get user suggestion
+    data = request.get_json() or {}
+    suggestion = data.get('suggestion', '').strip()
+
+    # Store suggestion for NEXT stage (current stage is done)
+    next_stage = Stage.get_next(job.current_stage)
+    if next_stage and suggestion:
+        job.user_suggestions[next_stage] = suggestion
+        logger.info(f"Job {job_id}: User suggestion for {next_stage.value}: {suggestion[:50]}...")
+
+    # Resume pipeline
+    job.status = JobStatus.RUNNING
+    job_store.update_job(job)
+
+    if next_stage:
+        gevent.spawn(run_job_stage, job.id, next_stage)
+        return jsonify({
+            'status': 'resumed',
+            'next_stage': next_stage.value,
+            'next_stage_name': Stage.get_display_name(next_stage),
+            'suggestion_applied': bool(suggestion)
+        })
+    else:
+        # Should not happen - combine is final
+        job.status = JobStatus.COMPLETE
+        job_store.update_job(job)
+        return jsonify({'status': 'complete'})
+
+
+@app.route('/api/job/<job_id>', methods=['DELETE'])
+@login_required
+def delete_interactive_job(job_id):
+    """Delete a job and its files"""
+    job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
+
+    # Delete from store
+    job_store.delete_job(job_id)
+
+    # Cleanup files
+    job_dir = TEMP_DIR / job_id
+    if job_dir.exists():
+        shutil.rmtree(job_dir, ignore_errors=True)
+
+    return jsonify({'status': 'deleted'})
 
 
 if __name__ == '__main__':

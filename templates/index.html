@@ -204,6 +204,56 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Stage Preview Panel (for interactive pipeline) -->
+                <div id="stage-preview-panel" class="hidden">
+                    <div class="preview-header">
+                        <h3 id="preview-stage-name">Stage Output</h3>
+                        <span class="preview-badge">Review Required</span>
+                    </div>
+
+                    <div class="preview-content-wrapper">
+                        <pre id="preview-content" class="preview-text"></pre>
+                    </div>
+
+                    <!-- Citations (shown during research stage) -->
+                    <div id="preview-citations" class="preview-citations hidden">
+                        <h4>Research Sources</h4>
+                        <div id="preview-citations-list"></div>
+                    </div>
+
+                    <!-- Changes (shown during enhance stage) -->
+                    <div id="preview-changes" class="preview-changes hidden">
+                        <h4>Changes Made</h4>
+                        <div id="preview-changes-list"></div>
+                    </div>
+
+                    <!-- Quick Suggestion Buttons -->
+                    <div class="quick-suggestions">
+                        <span class="quick-label">Quick suggestions:</span>
+                        <button type="button" class="quick-btn" data-suggestion="Focus on statistics and data">More statistics</button>
+                        <button type="button" class="quick-btn" data-suggestion="Make it funnier and more engaging">Make it funnier</button>
+                        <button type="button" class="quick-btn" data-suggestion="Add more real-world examples">More examples</button>
+                        <button type="button" class="quick-btn" data-suggestion="Simplify the language">Simplify</button>
+                        <button type="button" class="quick-btn" data-suggestion="Make it more conversational">More casual</button>
+                    </div>
+
+                    <!-- Custom Input -->
+                    <div class="suggestion-input-wrapper">
+                        <textarea id="suggestion-input" placeholder="Optional: Enter your own guidance for the next stage..." rows="2"></textarea>
+                    </div>
+
+                    <!-- Continue Button -->
+                    <div class="preview-actions">
+                        <button type="button" id="continue-btn" class="continue-btn">
+                            <span>Continue to Next Stage</span>
+                            <span class="btn-arrow">&#8594;</span>
+                        </button>
+                        <button type="button" id="skip-reviews-btn" class="skip-btn">
+                            Skip All Reviews
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <div id="result-section" class="hidden">
@@ -607,7 +657,376 @@
             chunkFill.style.width = '0%';
             chunkCount.textContent = '0 / 0 chunks';
             generateBtn.disabled = false;
+            // Reset interactive pipeline state
+            if (interactivePipeline) {
+                interactivePipeline.reset();
+            }
         }
+
+        // ========================================
+        // Interactive Pipeline Class
+        // ========================================
+        class InteractivePipeline {
+            constructor() {
+                this.jobId = null;
+                this.pollInterval = null;
+                this.skipReviews = false;
+                this.isActive = false;
+
+                // DOM elements
+                this.previewPanel = document.getElementById('stage-preview-panel');
+                this.previewStageName = document.getElementById('preview-stage-name');
+                this.previewContent = document.getElementById('preview-content');
+                this.previewCitations = document.getElementById('preview-citations');
+                this.previewCitationsList = document.getElementById('preview-citations-list');
+                this.previewChanges = document.getElementById('preview-changes');
+                this.previewChangesList = document.getElementById('preview-changes-list');
+                this.suggestionInput = document.getElementById('suggestion-input');
+                this.continueBtn = document.getElementById('continue-btn');
+                this.skipReviewsBtn = document.getElementById('skip-reviews-btn');
+
+                this.setupEventListeners();
+            }
+
+            setupEventListeners() {
+                // Quick suggestion buttons
+                document.querySelectorAll('.quick-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const suggestion = e.target.dataset.suggestion;
+                        this.suggestionInput.value = suggestion;
+                        // Visual feedback
+                        document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('selected'));
+                        e.target.classList.add('selected');
+                    });
+                });
+
+                // Continue button
+                this.continueBtn.addEventListener('click', () => {
+                    this.continueWithSuggestion(this.suggestionInput.value);
+                });
+
+                // Skip all reviews button
+                this.skipReviewsBtn.addEventListener('click', () => {
+                    this.skipReviews = true;
+                    this.continueWithSuggestion('');
+                });
+            }
+
+            async startJob(formData) {
+                this.isActive = true;
+                this.skipReviews = false;
+
+                try {
+                    const response = await fetch('/api/job', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Failed to create job');
+                    }
+
+                    const data = await response.json();
+                    this.jobId = data.job_id;
+
+                    addActivity('🚀', 'Interactive pipeline started', 'thinking');
+                    this.startPolling();
+
+                } catch (error) {
+                    showError('Failed to start job: ' + error.message);
+                }
+            }
+
+            startPolling() {
+                this.stopPolling();
+                this.pollInterval = setInterval(() => this.checkStatus(), 1500);
+            }
+
+            stopPolling() {
+                if (this.pollInterval) {
+                    clearInterval(this.pollInterval);
+                    this.pollInterval = null;
+                }
+            }
+
+            async checkStatus() {
+                if (!this.jobId || !this.isActive) return;
+
+                try {
+                    const response = await fetch(`/api/job/${this.jobId}/status`);
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Failed to get status');
+                    }
+
+                    const data = await response.json();
+                    this.handleStatusUpdate(data);
+
+                } catch (error) {
+                    console.error('Status check failed:', error);
+                    // Don't show error for transient failures
+                }
+            }
+
+            handleStatusUpdate(data) {
+                // Update pipeline stage visualization
+                if (data.current_stage && typeof updatePipelineStage === 'function') {
+                    updatePipelineStage(data.current_stage, 0.5);
+                }
+
+                // Update stage title
+                if (data.stage_name) {
+                    document.getElementById('stage-title').textContent = data.stage_name;
+                }
+
+                switch (data.status) {
+                    case 'running':
+                        progressMessage.textContent = `Processing ${data.stage_name || data.current_stage}...`;
+                        this.hidePreviewPanel();
+                        break;
+
+                    case 'paused_for_review':
+                        this.stopPolling();
+                        if (this.skipReviews) {
+                            // Auto-continue without showing preview
+                            this.continueWithSuggestion('');
+                        } else {
+                            this.showStagePreview(data);
+                        }
+                        break;
+
+                    case 'complete':
+                        this.stopPolling();
+                        this.showComplete(data);
+                        break;
+
+                    case 'error':
+                        this.stopPolling();
+                        showError(data.error_message || 'Pipeline error');
+                        break;
+                }
+            }
+
+            showStagePreview(data) {
+                const preview = data.stage_preview;
+                if (!preview) return;
+
+                // Update stage name
+                this.previewStageName.textContent = preview.stage_name + ' Complete';
+
+                // Update preview content
+                this.previewContent.textContent = preview.preview || 'No preview available';
+
+                // Show citations if available (research stage)
+                if (preview.citations && preview.citations.length > 0) {
+                    this.previewCitations.classList.remove('hidden');
+                    this.previewCitationsList.innerHTML = preview.citations.map((url, i) => {
+                        const domain = this.extractDomain(url);
+                        return `<a href="${this.escapeHtml(url)}" target="_blank" class="citation-link">
+                            <span class="citation-number">${i + 1}</span>
+                            <span class="citation-domain">${domain}</span>
+                        </a>`;
+                    }).join('');
+
+                    // Also update the sources panel
+                    updateSources(preview.citations, null);
+                } else {
+                    this.previewCitations.classList.add('hidden');
+                }
+
+                // Show changes if available (enhance stage)
+                if (preview.changes && preview.changes.length > 0) {
+                    this.previewChanges.classList.remove('hidden');
+                    this.previewChangesList.innerHTML = preview.changes.map(change => {
+                        return `<div class="change-item-mini">
+                            <span class="change-ep">Ep ${change.episode}</span>
+                            <span class="change-stat">+${change.words_added} words</span>
+                        </div>`;
+                    }).join('');
+
+                    // Also update the changes panel
+                    updateChanges(preview.changes);
+                } else {
+                    this.previewChanges.classList.add('hidden');
+                }
+
+                // Clear previous suggestion
+                this.suggestionInput.value = '';
+                document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('selected'));
+
+                // Show the preview panel
+                this.previewPanel.classList.remove('hidden');
+
+                // Add activity
+                const stageIcons = {
+                    'analyze': '📄',
+                    'research': '🔍',
+                    'enhance': '🧠',
+                    'expand': '📝',
+                    'generate': '🎙️',
+                    'combine': '✨'
+                };
+                const icon = stageIcons[preview.stage] || '✅';
+                addActivity(icon, `${preview.stage_name} complete - awaiting review`, preview.stage);
+            }
+
+            hidePreviewPanel() {
+                this.previewPanel.classList.add('hidden');
+            }
+
+            async continueWithSuggestion(suggestion) {
+                if (!this.jobId) return;
+
+                // Disable buttons while processing
+                this.continueBtn.disabled = true;
+                this.skipReviewsBtn.disabled = true;
+
+                try {
+                    const response = await fetch(`/api/job/${this.jobId}/continue`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ suggestion: suggestion || '' })
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Failed to continue');
+                    }
+
+                    // Log suggestion if provided
+                    if (suggestion) {
+                        addActivity('💬', `User guidance: "${suggestion.substring(0, 50)}${suggestion.length > 50 ? '...' : ''}"`, 'info');
+                    }
+
+                    // Hide preview and resume polling
+                    this.hidePreviewPanel();
+                    this.startPolling();
+
+                } catch (error) {
+                    showError('Failed to continue: ' + error.message);
+                } finally {
+                    this.continueBtn.disabled = false;
+                    this.skipReviewsBtn.disabled = false;
+                }
+            }
+
+            showComplete(data) {
+                // Stop pipeline animation
+                if (typeof stopPipeline === 'function') {
+                    stopPipeline();
+                }
+
+                addActivity('✅', 'Audio generated successfully!', 'complete');
+
+                this.hidePreviewPanel();
+                progressSection.classList.add('hidden');
+                resultSection.classList.remove('hidden');
+
+                if (data.size_mb) {
+                    resultSize.textContent = `Size: ${data.size_mb} MB`;
+                }
+
+                if (data.filename && resultFilename) {
+                    resultFilename.textContent = data.filename;
+                }
+
+                if (data.download_id) {
+                    downloadLink.href = `/download/${data.download_id}`;
+                    if (data.filename) {
+                        downloadLink.download = data.filename;
+                    }
+                    downloadLink.onclick = function() {
+                        setTimeout(() => {
+                            fetch(`/cleanup/${data.download_id}`, { method: 'POST' });
+                        }, 300000);
+                    };
+                }
+
+                if (data.transcript_id) {
+                    transcriptLink.href = `/download-transcript/${data.transcript_id}`;
+                    transcriptLink.classList.remove('hidden');
+                    addActivity('📄', 'Transcript available for download', 'complete');
+                }
+
+                this.isActive = false;
+            }
+
+            reset() {
+                this.stopPolling();
+                this.jobId = null;
+                this.skipReviews = false;
+                this.isActive = false;
+                this.hidePreviewPanel();
+                this.suggestionInput.value = '';
+                document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('selected'));
+            }
+
+            extractDomain(url) {
+                try {
+                    const u = new URL(url);
+                    return u.hostname.replace('www.', '');
+                } catch {
+                    return url.substring(0, 30);
+                }
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+        }
+
+        // Initialize interactive pipeline
+        const interactivePipeline = new InteractivePipeline();
+
+        // Check if AI enhance is enabled to use interactive pipeline
+        function shouldUseInteractivePipeline() {
+            const aiEnhance = document.getElementById('ai_enhance');
+            return aiEnhance && aiEnhance.checked;
+        }
+
+        // Override form submission to use interactive pipeline when AI enhance is on
+        const originalFormHandler = form.onsubmit;
+        form.addEventListener('submit', async function(e) {
+            // Only intercept if AI enhance is enabled
+            if (!shouldUseInteractivePipeline()) {
+                return; // Let the original handler process it
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const text = document.getElementById('text').value;
+            const file = fileInput.files[0];
+
+            if (!text.trim() && !file) {
+                alert('Please paste a script or upload a file.');
+                return;
+            }
+
+            // Reset workbench state
+            resetWorkbench();
+            startTime = Date.now();
+
+            // Show progress and start pipeline animation
+            form.classList.add('hidden');
+            progressSection.classList.remove('hidden');
+            resultSection.classList.add('hidden');
+            errorSection.classList.add('hidden');
+
+            // Initialize and start pipeline visualization
+            if (typeof initPipeline === 'function') {
+                initPipeline();
+                startPipeline('analyze');
+            }
+
+            // Use interactive pipeline
+            const formData = new FormData(form);
+            await interactivePipeline.startJob(formData);
+
+        }, true); // Use capture phase to intercept before original handler
     </script>
 </body>
 </html>
