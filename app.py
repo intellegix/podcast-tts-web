@@ -282,14 +282,22 @@ ENHANCEMENT RULES:
 2. PACING: Vary sentence length. Short punchy lines. Then longer explanatory ones. Create rhythm.
 3. PERSONALITY: Add speaker quirks, callbacks to earlier points, genuine reactions
 4. ENTERTAINMENT: Include subtle humor, relatable analogies, storytelling moments
-5. TTS OPTIMIZATION (CRITICAL):
+5. HIGHLY EDUCATIONAL BUT ACCESSIBLE:
+   - Explain ALL technical concepts in simple, relatable terms anyone can understand
+   - Use everyday analogies and real-world examples to illustrate complex ideas
+   - Break down jargon: "That's called X, which basically means..."
+   - Connect new concepts to things listeners already know
+   - Make learning feel like a fun conversation, not a lecture
+   - ALEX often asks "Can you explain that for someone who's new to this?"
+   - SARAH uses phrases like "Think of it like..." or "Imagine if..."
+6. TTS OPTIMIZATION (CRITICAL):
    - Write ALL numbers as words (fifty-eight thousand, not 58,000)
    - Spell out abbreviations on first use (Purchase Order, or P O, not PO)
    - Add natural pauses with punctuation (commas, ellipses, dashes)
    - Avoid tongue-twisters and awkward consonant clusters
    - Use contractions naturally (don't, won't, can't)
-6. EMOTIONAL BEATS: Add moments of excitement, surprise, reflection
-7. LISTENER HOOKS: Tease upcoming content, create curiosity gaps
+7. EMOTIONAL BEATS: Add moments of excitement, surprise, reflection
+8. LISTENER HOOKS: Tease upcoming content, create curiosity gaps
 
 PRESERVE:
 - All factual information and technical details
