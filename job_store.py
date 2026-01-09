@@ -31,6 +31,7 @@ class PodcastLength(Enum):
     MEDIUM = "medium"    # ~10-15 minutes - balanced detail
     LONG = "long"        # ~15-25 minutes - in-depth exploration
     EXTENDED = "extended"  # ~25-40 minutes - comprehensive deep-dive
+    COMPREHENSIVE = "comprehensive"  # No time limit - processes ALL content with full detail
 
     @classmethod
     def get_config(cls, length: 'PodcastLength') -> dict:
@@ -86,6 +87,17 @@ class PodcastLength(Enum):
                 'word_target': 6000,
                 'expand_instruction': 'CRITICAL: You MUST generate approximately 6000 words of dialogue (about 40 minutes of audio). Create exhaustive coverage with extensive examples, case studies, historical context, expert perspectives, and detailed tangents for every point. This should be a comprehensive deep-dive.',
                 'enhance_instruction': 'Create immersive, podcast-style dialogue that is approximately 6000 words long (40 minutes of audio). Include extensive exploration, multiple anecdotes per topic, deep explanations, listener Q&A style segments, and thorough coverage of every aspect. DO NOT shorten or condense.'
+            },
+            cls.COMPREHENSIVE: {
+                'display_name': 'Comprehensive (Process ALL Content)',
+                'description': 'No time limit - covers ALL provided content with full detail',
+                'research_agents': 8,
+                'research_depth': 'exhaustive',
+                'detail_level': 'comprehensive',
+                'word_target': None,  # No word limit - content determines length
+                'minimum_coverage': 1.0,  # 100% topic coverage required
+                'expand_instruction': 'CRITICAL: You MUST cover every single topic and detail provided in the source material. There is NO word limit or time constraint. Generate comprehensive dialogue that explores ALL topics with extensive examples, case studies, expert perspectives, and detailed explanations. Length should be determined by content richness, not arbitrary targets. Minimum 3-5 minutes per major topic.',
+                'enhance_instruction': 'Create comprehensive podcast dialogue covering ALL provided content. There is NO word limit - length is determined by content depth. Every single topic from the source must receive thorough coverage with multiple examples, analogies, and detailed explanations. Maintain natural conversation flow while ensuring 100% content coverage. This should be as long as needed to cover everything properly.'
             }
         }
         return configs.get(length, configs[cls.MEDIUM])

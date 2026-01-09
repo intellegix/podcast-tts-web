@@ -1351,10 +1351,21 @@ def enhance_episode_with_claude(episode_data):
         prompt_parts.append(f"\n\nEPISODE TO ENHANCE:\n{episode_text}")
 
         # Calculate dynamic max_tokens based on expected output size
-        # Allow room for expansion: estimate ~4 tokens per word, target 3-5x expansion
         input_words = len(episode_text.split())
-        estimated_output_tokens = max(input_words * 5 * 1.5, 8000)  # 5x expansion, 1.5 tokens/word
-        dynamic_max_tokens = min(16000, int(estimated_output_tokens))  # Cap at 16K for Claude 3.5
+
+        # Check if we're in COMPREHENSIVE mode (no word limits)
+        is_comprehensive = "COMPREHENSIVE CONTENT EXPANSION" in style_guidance if style_guidance else False
+
+        if is_comprehensive:
+            # COMPREHENSIVE mode: Allow much larger outputs, use Claude's full context window
+            # Estimate aggressive expansion for thorough coverage (10-15x expansion possible)
+            estimated_output_tokens = max(input_words * 10 * 1.5, 16000)  # 10x expansion for comprehensive coverage
+            dynamic_max_tokens = min(100000, int(estimated_output_tokens))  # Use Claude's full 200K context, cap at 100K for output
+            logger.info(f"COMPREHENSIVE mode: input={input_words} words, max_tokens={dynamic_max_tokens}")
+        else:
+            # Standard mode: Original logic with conservative caps
+            estimated_output_tokens = max(input_words * 5 * 1.5, 8000)  # 5x expansion, 1.5 tokens/word
+            dynamic_max_tokens = min(16000, int(estimated_output_tokens))  # Cap at 16K for standard modes
 
         # Try primary model, fallback to older model if not available
         model_to_use = CLAUDE_MODEL
@@ -2264,6 +2275,80 @@ def verify_topic_coverage(final_text: str, topics: list) -> dict:
     }
 
 
+def analyze_content_complexity(text: str, detected_topics: List[str]) -> dict:
+    """
+    Analyze input content to determine appropriate length and depth for COMPREHENSIVE mode.
+    Returns complexity metrics and recommendations for content-adaptive processing.
+    """
+    if not detected_topics:
+        detected_topics = detect_topics(text)
+
+    # Count substantive content markers that indicate depth
+    topic_depth_indicators = [
+        "Publication Date:",
+        "Source:",
+        "Key highlights:",
+        "Sources:",
+        "Details:",
+        "Analysis:",
+        "Key developments:",
+        "Background:",
+        "Expert",
+        "Research",
+        "Study",
+        "Data",
+        "Statistics"
+    ]
+
+    # Calculate content richness score based on indicators
+    content_richness_score = 0
+    lines = text.split('\n')
+    for line in lines:
+        for indicator in topic_depth_indicators:
+            if indicator.lower() in line.lower():
+                content_richness_score += 1
+
+    # Estimate required coverage time per topic
+    estimated_minutes_per_topic = {}
+    total_words = len(text.split())
+    words_per_topic = total_words / max(len(detected_topics), 1)
+
+    for topic in detected_topics:
+        # Base time: 3 minutes minimum per topic
+        base_minutes = 3.0
+
+        # Add time based on content richness for this topic
+        topic_mentions = text.lower().count(topic.lower())
+        detail_multiplier = min(3.0, 1.0 + (topic_mentions * 0.3))
+
+        # Add time based on words available for this topic
+        word_multiplier = min(2.0, 1.0 + (words_per_topic / 500))  # +1 minute per 500 words
+
+        estimated_minutes = base_minutes * detail_multiplier * word_multiplier
+        estimated_minutes_per_topic[topic] = round(estimated_minutes, 1)
+
+    total_estimated_duration = sum(estimated_minutes_per_topic.values())
+
+    # Determine recommended detail level based on total duration
+    if total_estimated_duration < 15:
+        recommended_detail_level = "medium"
+    elif total_estimated_duration < 30:
+        recommended_detail_level = "long"
+    elif total_estimated_duration < 50:
+        recommended_detail_level = "extended"
+    else:
+        recommended_detail_level = "comprehensive"
+
+    return {
+        "estimated_duration_minutes": round(total_estimated_duration, 1),
+        "topic_complexity": estimated_minutes_per_topic,
+        "content_richness_score": content_richness_score,
+        "recommended_detail_level": recommended_detail_level,
+        "total_topics": len(detected_topics),
+        "average_minutes_per_topic": round(total_estimated_duration / max(len(detected_topics), 1), 1)
+    }
+
+
 def run_stage_analyze(job: Job) -> StageResult:
     """Analyze stage - detect episodes, check completeness, and validate length selection"""
     text = job.text
@@ -2519,10 +2604,41 @@ def run_stage_enhance(job: Job) -> StageResult:
 
     # Calculate current word count to determine expansion needed
     current_word_count = len(text.split())
-    words_needed = max(0, word_target - current_word_count)
-    expansion_ratio = word_target / max(current_word_count, 1)
 
-    logger.info(f"Enhance stage: current={current_word_count} words, target={word_target}, ratio={expansion_ratio:.2f}x")
+    # Handle COMPREHENSIVE mode (no word limit) vs standard modes
+    if word_target is None:
+        # COMPREHENSIVE mode - content determines length
+        is_comprehensive_mode = True
+        words_needed = 0  # No artificial limit
+        expansion_ratio = float('inf')  # Always expand for comprehensive coverage
+        logger.info(f"Enhance stage: COMPREHENSIVE mode, current={current_word_count} words, no target limit")
+
+        preview_lines = [f"Claude enhancement (COMPREHENSIVE mode - no word limit):\n"]
+        preview_lines.append(f"Input: {current_word_count} words → Processing ALL content with full detail\n")
+
+        # Estimate content-appropriate length (3-5 minutes per major topic)
+        num_topics = len(job.detected_topics) if job.detected_topics else 1
+        estimated_minutes_per_topic = 4  # Average 4 minutes per topic
+        estimated_total_minutes = num_topics * estimated_minutes_per_topic
+        estimated_words = estimated_total_minutes * 150  # ~150 words per minute
+        words_per_episode = estimated_words // max(len(episodes), 1)
+
+        logger.info(f"COMPREHENSIVE: Estimated {estimated_total_minutes} min ({estimated_words} words) for {num_topics} topics")
+
+    else:
+        # Standard mode with word targets
+        is_comprehensive_mode = False
+        words_needed = max(0, word_target - current_word_count)
+        expansion_ratio = word_target / max(current_word_count, 1)
+
+        logger.info(f"Enhance stage: current={current_word_count} words, target={word_target}, ratio={expansion_ratio:.2f}x")
+
+        preview_lines = [f"Claude enhancement ({detail_level} detail, ~{word_target} words target):\n"]
+        preview_lines.append(f"Input: {current_word_count} words → Target: {word_target} words ({expansion_ratio:.1f}x expansion)\n")
+
+        # Calculate per-episode word targets
+        num_episodes = len(episodes)
+        words_per_episode = word_target // max(num_episodes, 1)
 
     if not CLAUDE_API_KEY:
         return StageResult(
@@ -2534,12 +2650,6 @@ def run_stage_enhance(job: Job) -> StageResult:
 
     all_changes = []
     enhanced_map = {}
-    preview_lines = [f"Claude enhancement ({detail_level} detail, ~{word_target} words target):\n"]
-    preview_lines.append(f"Input: {current_word_count} words → Target: {word_target} words ({expansion_ratio:.1f}x expansion)\n")
-
-    # Calculate per-episode word targets
-    num_episodes = len(episodes)
-    words_per_episode = word_target // max(num_episodes, 1)
 
     # Get detected topics for mandatory coverage
     all_topics = job.detected_topics if job.detected_topics else detect_topics(text)
@@ -2563,8 +2673,30 @@ FAILURE TO COVER ANY TOPIC IS UNACCEPTABLE.
 After writing, verify EACH topic above has corresponding dialogue content.
 === END MANDATORY COVERAGE ===
 """
-        if expansion_ratio > 1.5:
-            # Need significant expansion
+        if is_comprehensive_mode:
+            # COMPREHENSIVE mode - no word limits, content-driven expansion
+            style_guidance = f"""{mandatory_coverage}
+
+COMPREHENSIVE CONTENT EXPANSION - NO WORD LIMITS:
+You are in COMPREHENSIVE mode. There are NO word or time constraints.
+This episode should be approximately {words_per_episode} words (currently {ep_word_count} words) based on content depth.
+Your goal is to create thorough, educational dialogue that covers EVERY topic with full detail:
+
+1. Spend 3-5 minutes of dialogue (450-750 words) on EACH major topic
+2. Include multiple detailed examples, case studies, and real-world scenarios for EVERY point
+3. Have ALEX ask probing follow-up questions that SARAH answers comprehensively
+4. Add extensive educational context, background information, and expert perspectives
+5. Explore implications, applications, and future trends for each topic
+6. Include analogies, "think of it like" explanations, and conversational depth
+7. Add relevant tangents and interesting connections between topics
+8. Ensure every piece of information from the source material appears in the dialogue
+
+LENGTH IS DETERMINED BY CONTENT RICHNESS, NOT ARBITRARY LIMITS.
+Generate as much dialogue as needed to thoroughly cover all topics.
+
+{enhance_instruction}"""
+        elif expansion_ratio > 1.5:
+            # Need significant expansion for standard modes
             style_guidance = f"""{mandatory_coverage}
 
 EXPANSION REQUIREMENT:
