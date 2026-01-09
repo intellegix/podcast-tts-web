@@ -2372,11 +2372,19 @@ def run_stage_analyze(job: Job) -> StageResult:
     estimated_words_needed = estimate_coverage_words(topics, input_word_count)
 
     # Determine if length selection is adequate
-    coverage_ratio = word_target / max(estimated_words_needed, 1)
     length_warning = None
     recommended_length = None
 
-    if coverage_ratio < 0.7:  # Selected length covers less than 70% of estimated needs
+    # Handle COMPREHENSIVE mode (no word target) vs standard modes
+    if word_target is None:
+        # COMPREHENSIVE mode - no coverage ratio needed, always adequate
+        coverage_ratio = float('inf')  # Infinite coverage capacity
+        logger.info(f"COMPREHENSIVE mode selected - will cover all content regardless of estimated needs ({estimated_words_needed} words)")
+    else:
+        # Standard modes - check if target is adequate for content
+        coverage_ratio = word_target / max(estimated_words_needed, 1)
+
+    if word_target is not None and coverage_ratio < 0.7:  # Selected length covers less than 70% of estimated needs
         # Find recommended length
         from job_store import PodcastLength
         for length in [PodcastLength.EXTENDED, PodcastLength.LONG, PodcastLength.MEDIUM, PodcastLength.SHORT]:
@@ -2409,7 +2417,7 @@ def run_stage_analyze(job: Job) -> StageResult:
         f"  - {complete_count} complete (ready for processing)",
         f"  - {incomplete_count} incomplete (will be expanded)",
         f"  - {len(topics)} distinct topics detected",
-        f"  - Input: {input_word_count} words → Target: {word_target} words",
+        f"  - Input: {input_word_count} words → Target: {'No limit (COMPREHENSIVE)' if word_target is None else f'{word_target} words'}",
         "",
         "Episodes found:"
     ]
