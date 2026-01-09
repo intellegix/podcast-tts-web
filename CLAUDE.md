@@ -372,6 +372,11 @@ curl http://localhost:5000/health
 - Fixed rate limiting on status polling endpoint
 - Fixed TTS function calls and multi-voice chunk handling
 - Added interactive pipeline with user suggestions
+- **FIXED**: Enhance stage now actually expands content to meet length targets
+  - Root cause: style_guidance parameter was passed but never used
+  - Now calculates expansion ratio (target_words / current_words)
+  - When ratio > 1.5x, sends mandatory expansion instructions to Claude
+  - Claude prompt updated to allow expansion, not just polishing
 
 ---
 
