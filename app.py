@@ -2184,7 +2184,7 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
     }
 
 
-def detect_topics(text: str) -> Tuple[List[str], List[NewsTopicMetadata]]:
+def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
     """Detect distinct topics/sections in the input text."""
 
     # Check for Perplexity News format first
@@ -2296,7 +2296,7 @@ def get_topic_block(text: str, start_pos: int, current_order: int) -> str:
         return text[start_pos:]
 
 
-def parse_perplexity_news_threads(text: str) -> Tuple[List[str], List[NewsTopicMetadata]]:
+def parse_perplexity_news_threads(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
     """Parse Perplexity News Threads into topics and metadata"""
 
     # Pattern: ## N. Title followed by metadata
@@ -2549,7 +2549,7 @@ def run_stage_analyze(job: Job) -> StageResult:
     if job.is_news_format:
         preview_lines.extend([
             "",
-            f"📰 Perplexity News Threads Format Detected:",
+            f"[NEWS] Perplexity News Threads Format Detected:",
             f"  - {len(job.news_urls)} source URLs extracted for research",
             f"  - {len(topics)} news topics will be covered comprehensively"
         ])
@@ -2558,8 +2558,8 @@ def run_stage_analyze(job: Job) -> StageResult:
     if auto_recommend_comprehensive:
         preview_lines.extend([
             "",
-            f"💡 RECOMMENDATION: With {len(topics)} topics detected, consider using COMPREHENSIVE mode",
-            f"   for complete coverage without truncation."
+            f"RECOMMENDATION: With {len(topics)} topics detected, consider using COMPREHENSIVE mode",
+            f"                for complete coverage without truncation."
         ])
 
     preview_lines.extend([
