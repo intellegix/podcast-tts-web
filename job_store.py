@@ -188,6 +188,11 @@ class Job:
     final_text: str = ""
     detected_topics: List[str] = field(default_factory=list)  # Topics detected in analyze stage for mandatory coverage
 
+    # News format metadata (for Perplexity Personalized News Threads)
+    is_news_format: bool = False
+    news_metadata: Dict[str, Any] = field(default_factory=dict)  # Maps topic title -> NewsTopicMetadata
+    news_urls: List[str] = field(default_factory=list)  # Extracted URLs for research
+
     def to_dict(self) -> dict:
         """Convert job to JSON-serializable dict"""
         return {
@@ -198,7 +203,10 @@ class Job:
             'updated_at': self.updated_at.isoformat(),
             'error_message': self.error_message,
             'download_id': self.download_id,
-            'transcript_id': self.transcript_id
+            'transcript_id': self.transcript_id,
+            'is_news_format': self.is_news_format,
+            'news_url_count': len(self.news_urls),
+            'detected_topic_count': len(self.detected_topics)
         }
 
     def get_stage_preview(self) -> Optional[dict]:

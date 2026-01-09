@@ -28,7 +28,8 @@ from datetime import datetime
 from pathlib import Path
 from functools import wraps
 from collections import deque
-from typing import List
+from typing import List, Tuple, Optional
+from dataclasses import dataclass
 from flask import Flask, render_template, request, jsonify, send_file, Response, session, redirect, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -2183,8 +2184,16 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
     }
 
 
-def detect_topics(text: str) -> list:
+def detect_topics(text: str) -> Tuple[List[str], List[NewsTopicMetadata]]:
     """Detect distinct topics/sections in the input text."""
+
+    # Check for Perplexity News format first
+    if detect_perplexity_news_format(text):
+        logger.info("Detected Perplexity Personalized News Threads format")
+        topics, news_metadata = parse_perplexity_news_threads(text)
+        return topics, news_metadata  # Return both topics and metadata
+
+    # Standard format processing
     topics = []
 
     # Common topic indicators
@@ -2223,7 +2232,99 @@ def detect_topics(text: str) -> list:
             if len(first_sentence) > 20 and first_sentence not in topics:
                 topics.append(first_sentence)
 
-    return topics[:20]  # Limit to 20 topics max
+    # Return topics with empty metadata for standard format
+    return topics, []
+
+
+def detect_perplexity_news_format(text: str) -> bool:
+    """Detect if input is Perplexity Personalized News Threads format"""
+    perplexity_patterns = [
+        r'##\s*\d+\.\s+.+?\n\*\*Published:\*\*',  # ## 1. Title \n **Published:**
+        r'##\s*\d+\.\s+.+?\n\*\*Sources:\*\*',    # ## 1. Title \n **Sources:**
+        r'\*\*URL:\*\*\s*https?://.*perplexity\.ai', # **URL:** perplexity link
+        r'##\s*\d+\.\s+.+?Published.*ago'          # ## 1. Title Published: X ago
+    ]
+
+    matches = sum(1 for pattern in perplexity_patterns if re.search(pattern, text, re.MULTILINE))
+    return matches >= 2  # Require at least 2 pattern matches
+
+
+@dataclass
+class NewsTopicMetadata:
+    title: str
+    published: Optional[str] = None
+    sources_count: Optional[int] = None
+    summary: Optional[str] = None
+    url: Optional[str] = None
+    order: int = 0
+
+
+def extract_published(topic_block: str) -> Optional[str]:
+    """Extract published timestamp from topic block"""
+    published_match = re.search(r'\*\*Published:\*\*\s*(.+?)(?:\n|\*\*|$)', topic_block)
+    return published_match.group(1).strip() if published_match else None
+
+
+def extract_sources_count(topic_block: str) -> Optional[int]:
+    """Extract number of sources from topic block"""
+    sources_match = re.search(r'\*\*Sources:\*\*\s*(\d+)\s*sources?', topic_block)
+    return int(sources_match.group(1)) if sources_match else None
+
+
+def extract_summary(topic_block: str) -> Optional[str]:
+    """Extract summary from topic block"""
+    summary_match = re.search(r'\*\*Summary:\*\*\s*(.+?)(?:\n\*\*|$)', topic_block, re.DOTALL)
+    return summary_match.group(1).strip() if summary_match else None
+
+
+def extract_url(topic_block: str) -> Optional[str]:
+    """Extract URL from topic block"""
+    url_match = re.search(r'\*\*URL:\*\*\s*(https?://\S+)', topic_block)
+    return url_match.group(1).strip() if url_match else None
+
+
+def get_topic_block(text: str, start_pos: int, current_order: int) -> str:
+    """Extract the metadata block for a specific topic"""
+    # Find the next topic header or end of text
+    next_topic_pattern = fr'##\s*{current_order + 1}\.'
+    next_match = re.search(next_topic_pattern, text[start_pos:], re.MULTILINE)
+
+    if next_match:
+        end_pos = start_pos + next_match.start()
+        return text[start_pos:end_pos]
+    else:
+        return text[start_pos:]
+
+
+def parse_perplexity_news_threads(text: str) -> Tuple[List[str], List[NewsTopicMetadata]]:
+    """Parse Perplexity News Threads into topics and metadata"""
+
+    # Pattern: ## N. Title followed by metadata
+    topic_pattern = r'##\s*(\d+)\.\s*(.+?)(?=\n)'
+    topics = []
+    metadata = []
+
+    for match in re.finditer(topic_pattern, text, re.MULTILINE):
+        order = int(match.group(1))
+        title = match.group(2).strip()
+
+        # Extract metadata for this topic
+        topic_block = get_topic_block(text, match.end(), order)
+
+        meta = NewsTopicMetadata(
+            title=title,
+            order=order,
+            published=extract_published(topic_block),
+            sources_count=extract_sources_count(topic_block),
+            summary=extract_summary(topic_block),
+            url=extract_url(topic_block)
+        )
+
+        topics.append(f"{order}. {title}")
+        metadata.append(meta)
+
+    logger.info(f"Parsed {len(topics)} Perplexity news topics")
+    return topics[:125], metadata[:125]  # Cap at 125 topics for performance
 
 
 def estimate_coverage_words(topics: list, input_word_count: int) -> int:
@@ -2288,7 +2389,7 @@ def analyze_content_complexity(text: str, detected_topics: List[str]) -> dict:
     Returns complexity metrics and recommendations for content-adaptive processing.
     """
     if not detected_topics:
-        detected_topics = detect_topics(text)
+        detected_topics, _ = detect_topics(text)  # Extract topics, ignore metadata
 
     # Count substantive content markers that indicate depth
     topic_depth_indicators = [
@@ -2376,9 +2477,24 @@ def run_stage_analyze(job: Job) -> StageResult:
 
     # Analyze content coverage
     input_word_count = len(text.split())
-    topics = detect_topics(text)
+    topics, news_metadata = detect_topics(text)
     job.detected_topics = topics  # Persist topics for mandatory coverage in enhance stage
+
+    # Handle news format metadata
+    if news_metadata:
+        job.is_news_format = True
+        job.news_metadata = {meta.title: meta for meta in news_metadata}
+        job.news_urls = [meta.url for meta in news_metadata if meta.url]
+        logger.info(f"Detected {len(topics)} news topics with {len(job.news_urls)} URLs")
+    else:
+        job.is_news_format = False
+
     estimated_words_needed = estimate_coverage_words(topics, input_word_count)
+
+    # Auto-recommend COMPREHENSIVE for large topic counts (50+ topics)
+    auto_recommend_comprehensive = len(topics) >= 50 and job.target_length != PodcastLength.COMPREHENSIVE
+    if auto_recommend_comprehensive:
+        logger.info(f"Auto-recommending COMPREHENSIVE mode for {len(topics)} topics")
 
     # Determine if length selection is adequate
     length_warning = None
@@ -2427,9 +2543,29 @@ def run_stage_analyze(job: Job) -> StageResult:
         f"  - {incomplete_count} incomplete (will be expanded)",
         f"  - {len(topics)} distinct topics detected",
         f"  - Input: {input_word_count} words → Target: {'No limit (COMPREHENSIVE)' if word_target is None else f'{word_target} words'}",
+    ]
+
+    # Add news format notification
+    if job.is_news_format:
+        preview_lines.extend([
+            "",
+            f"📰 Perplexity News Threads Format Detected:",
+            f"  - {len(job.news_urls)} source URLs extracted for research",
+            f"  - {len(topics)} news topics will be covered comprehensively"
+        ])
+
+    # Add recommendation for large topic counts
+    if auto_recommend_comprehensive:
+        preview_lines.extend([
+            "",
+            f"💡 RECOMMENDATION: With {len(topics)} topics detected, consider using COMPREHENSIVE mode",
+            f"   for complete coverage without truncation."
+        ])
+
+    preview_lines.extend([
         "",
         "Episodes found:"
-    ]
+    ])
 
     for ep in episodes[:5]:  # Show first 5
         status = "Complete" if ep['is_complete'] else "Needs expansion"
@@ -2462,7 +2598,10 @@ def run_stage_analyze(job: Job) -> StageResult:
             'input_word_count': input_word_count,
             'estimated_words_needed': estimated_words_needed,
             'coverage_ratio': round(coverage_ratio, 2),
-            'length_warning': length_warning is not None
+            'length_warning': length_warning is not None,
+            'is_news_format': job.is_news_format,
+            'news_url_count': len(job.news_urls) if job.news_urls else 0,
+            'auto_recommend_comprehensive': auto_recommend_comprehensive
         }
     )
 
@@ -2670,7 +2809,10 @@ def run_stage_enhance(job: Job) -> StageResult:
     enhanced_map = {}
 
     # Get detected topics for mandatory coverage
-    all_topics = job.detected_topics if job.detected_topics else detect_topics(text)
+    if job.detected_topics:
+        all_topics = job.detected_topics
+    else:
+        all_topics, _ = detect_topics(text)  # Extract topics, ignore metadata in fallback
     topic_list = "\n".join(f"   - {t[:80]}" for t in all_topics)
 
     # Enhance each episode
