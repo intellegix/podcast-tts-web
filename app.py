@@ -2237,7 +2237,8 @@ def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
 
 
 def detect_perplexity_news_format(text: str) -> bool:
-    """Detect if input is Perplexity Personalized News Threads format"""
+    """Detect if input is Perplexity Personalized News Threads format OR structured content"""
+    # Strict Perplexity patterns
     perplexity_patterns = [
         r'##\s*\d+\.\s+.+?\n\*\*Published:\*\*',  # ## 1. Title \n **Published:**
         r'##\s*\d+\.\s+.+?\n\*\*Sources:\*\*',    # ## 1. Title \n **Sources:**
@@ -2245,8 +2246,20 @@ def detect_perplexity_news_format(text: str) -> bool:
         r'##\s*\d+\.\s+.+?Published.*ago'          # ## 1. Title Published: X ago
     ]
 
-    matches = sum(1 for pattern in perplexity_patterns if re.search(pattern, text, re.MULTILINE))
-    return matches >= 2  # Require at least 2 pattern matches
+    strict_matches = sum(1 for pattern in perplexity_patterns if re.search(pattern, text, re.MULTILINE))
+    if strict_matches >= 2:
+        return True
+
+    # Broader structured content patterns
+    structured_patterns = [
+        r'##\s*\d+\.\s+.+?:.*',                   # ## 1. Title: Content
+        r'^\d+\.\s+[A-Z][^.]{20,80}:.*',          # 1. Title: Content (numbered sections)
+        r'#{2,4}\s+[IVX]+\.\s+.+?:.*',            # ## I. Section: Content (Roman numerals)
+        r'^\s*[A-Z][^.]{10,60}:\s*[A-Z][^.]{10,}', # Title: Long description
+    ]
+
+    structured_matches = sum(1 for pattern in structured_patterns if re.search(pattern, text, re.MULTILINE))
+    return structured_matches >= 3  # Need multiple structured elements
 
 
 @dataclass
@@ -2491,8 +2504,8 @@ def run_stage_analyze(job: Job) -> StageResult:
 
     estimated_words_needed = estimate_coverage_words(topics, input_word_count)
 
-    # Auto-recommend COMPREHENSIVE for large topic counts (50+ topics)
-    auto_recommend_comprehensive = len(topics) >= 50 and job.target_length != PodcastLength.COMPREHENSIVE
+    # Auto-recommend COMPREHENSIVE for large topic counts (25+ topics)
+    auto_recommend_comprehensive = len(topics) >= 25 and job.target_length != PodcastLength.COMPREHENSIVE
     if auto_recommend_comprehensive:
         logger.info(f"Auto-recommending COMPREHENSIVE mode for {len(topics)} topics")
 
@@ -2510,15 +2523,19 @@ def run_stage_analyze(job: Job) -> StageResult:
         coverage_ratio = word_target / max(estimated_words_needed, 1)
 
     if word_target is not None and coverage_ratio < 0.7:  # Selected length covers less than 70% of estimated needs
-        # Find recommended length
-        for length in [PodcastLength.EXTENDED, PodcastLength.LONG, PodcastLength.MEDIUM, PodcastLength.SHORT]:
-            cfg = PodcastLength.get_config(length)
-            if cfg['word_target'] >= estimated_words_needed * 0.8:
-                recommended_length = cfg['display_name']
-                break
+        # For large content or many topics, recommend COMPREHENSIVE mode
+        if estimated_words_needed > 15000 or len(topics) >= 25:
+            recommended_length = "COMPREHENSIVE (Process ALL Content)"
+        else:
+            # Find recommended length from fixed modes
+            for length in [PodcastLength.EXTENDED, PodcastLength.LONG, PodcastLength.MEDIUM, PodcastLength.SHORT]:
+                cfg = PodcastLength.get_config(length)
+                if cfg['word_target'] >= estimated_words_needed * 0.8:
+                    recommended_length = cfg['display_name']
+                    break
 
-        if not recommended_length:
-            recommended_length = "Extended (~25-40 min)"
+            if not recommended_length:
+                recommended_length = "COMPREHENSIVE (Process ALL Content)"
 
         length_warning = f"""
 ⚠️  LENGTH WARNING: Your input contains {len(topics)} distinct topics ({input_word_count} words).
@@ -2557,8 +2574,10 @@ def run_stage_analyze(job: Job) -> StageResult:
     if auto_recommend_comprehensive:
         preview_lines.extend([
             "",
-            f"RECOMMENDATION: With {len(topics)} topics detected, consider using COMPREHENSIVE mode",
-            f"                for complete coverage without truncation."
+            f"*** RECOMMENDATION: {len(topics)} topics detected - use COMPREHENSIVE mode ***",
+            f"    COMPREHENSIVE mode will cover ALL topics without word limits",
+            f"    Estimated output: {estimated_words_needed:,} words (~{estimated_words_needed//150} minutes)",
+            f"    Current Extended mode may truncate content to fit {word_target:,} word limit"
         ])
 
     preview_lines.extend([

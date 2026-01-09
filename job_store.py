@@ -84,9 +84,9 @@ class PodcastLength(Enum):
                 'research_agents': 8,
                 'research_depth': 'exhaustive',
                 'detail_level': 'comprehensive',
-                'word_target': 13500,
-                'expand_instruction': 'CRITICAL: You MUST generate approximately 13500 words of dialogue (about 90 minutes of audio). Create exhaustive coverage with extensive examples, case studies, historical context, expert perspectives, detailed tangents, and comprehensive exploration for every point. This should be a thorough deep-dive covering ALL aspects.',
-                'enhance_instruction': 'Create immersive, podcast-style dialogue that is approximately 13500 words long (90 minutes of audio). Include extensive exploration, multiple anecdotes per topic, deep explanations, listener Q&A style segments, detailed case studies, and thorough coverage of every aspect. DO NOT shorten or condense - aim for comprehensive coverage.'
+                'word_target': 40000,
+                'expand_instruction': 'CRITICAL: You MUST generate approximately 40,000 words of dialogue (about 90 minutes of audio). Create exhaustive coverage with extensive examples, case studies, historical context, expert perspectives, detailed tangents, and comprehensive exploration for every point. This should be a thorough deep-dive covering ALL aspects. DO NOT stop short - generate the full word count.',
+                'enhance_instruction': 'Create immersive, podcast-style dialogue that is approximately 40,000 words long (90 minutes of audio). Include extensive exploration, multiple anecdotes per topic, deep explanations, listener Q&A style segments, detailed case studies, and thorough coverage of every aspect. DO NOT shorten or condense - aim for comprehensive coverage. GENERATE THE FULL 40,000 WORDS.'
             },
             cls.COMPREHENSIVE: {
                 'display_name': 'Comprehensive (Process ALL Content)',
