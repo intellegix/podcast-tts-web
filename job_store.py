@@ -79,14 +79,14 @@ class PodcastLength(Enum):
                 'enhance_instruction': 'Create rich, detailed dialogue that is approximately 3500 words long (23 minutes of audio). Deeply explore ALL topics with multiple examples and anecdotes per point. Include fun tangents, deeper explanations, and let conversations breathe. DO NOT shorten.'
             },
             cls.EXTENDED: {
-                'display_name': 'Extended (~25-40 min)',
-                'description': 'Comprehensive deep-dive',
+                'display_name': 'Extended (~90 min)',
+                'description': 'Comprehensive deep-dive with maximum coverage',
                 'research_agents': 8,
                 'research_depth': 'exhaustive',
                 'detail_level': 'comprehensive',
-                'word_target': 6000,
-                'expand_instruction': 'CRITICAL: You MUST generate approximately 6000 words of dialogue (about 40 minutes of audio). Create exhaustive coverage with extensive examples, case studies, historical context, expert perspectives, and detailed tangents for every point. This should be a comprehensive deep-dive.',
-                'enhance_instruction': 'Create immersive, podcast-style dialogue that is approximately 6000 words long (40 minutes of audio). Include extensive exploration, multiple anecdotes per topic, deep explanations, listener Q&A style segments, and thorough coverage of every aspect. DO NOT shorten or condense.'
+                'word_target': 13500,
+                'expand_instruction': 'CRITICAL: You MUST generate approximately 13500 words of dialogue (about 90 minutes of audio). Create exhaustive coverage with extensive examples, case studies, historical context, expert perspectives, detailed tangents, and comprehensive exploration for every point. This should be a thorough deep-dive covering ALL aspects.',
+                'enhance_instruction': 'Create immersive, podcast-style dialogue that is approximately 13500 words long (90 minutes of audio). Include extensive exploration, multiple anecdotes per topic, deep explanations, listener Q&A style segments, detailed case studies, and thorough coverage of every aspect. DO NOT shorten or condense - aim for comprehensive coverage.'
             },
             cls.COMPREHENSIVE: {
                 'display_name': 'Comprehensive (Process ALL Content)',
