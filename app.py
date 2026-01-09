@@ -2307,7 +2307,7 @@ def run_stage_expand(job: Job) -> StageResult:
 
 def run_stage_enhance(job: Job) -> StageResult:
     """Enhancement stage - Claude polishes dialogue"""
-    text = job.final_text
+    text = job.final_text if job.final_text else job.text
     episodes = parse_episodes(text)
     research_map = job.research_map
     suggestion = job.user_suggestions.get(Stage.ENHANCE, '')
@@ -2381,7 +2381,7 @@ def run_stage_enhance(job: Job) -> StageResult:
 
 def run_stage_generate(job: Job) -> StageResult:
     """Generate stage - TTS audio generation"""
-    text = job.final_text
+    text = job.final_text if job.final_text else job.text
     job_id = job.id
     job_dir = TEMP_DIR / job_id
     job_dir.mkdir(exist_ok=True)
@@ -2395,7 +2395,8 @@ def run_stage_generate(job: Job) -> StageResult:
         if not speakers:
             speakers = ['ALEX', 'SARAH']
         voice_assignments = assign_speaker_voices(speakers)
-        chunks = split_by_speaker(processed, voice_assignments, job.voice)
+        chunk_dicts = split_by_speaker(processed, voice_assignments)
+        chunks = [(d['text'], d['voice'], d.get('speaker')) for d in chunk_dicts]
     else:
         chunks = split_into_chunks(processed)
         chunks = [(chunk, job.voice, None) for chunk in chunks]
@@ -2409,7 +2410,7 @@ def run_stage_generate(job: Job) -> StageResult:
     for idx, (chunk_text, chunk_voice, speaker) in enumerate(chunks):
         output_path = job_dir / f"chunk_{idx:04d}.mp3"
         try:
-            generate_tts_audio(chunk_text, chunk_voice, job.model, output_path)
+            call_openai_tts_with_retry(chunk_text, chunk_voice, job.model, output_path)
             chunk_files.append(output_path)
         except Exception as e:
             logger.error(f"TTS chunk {idx} failed: {e}")
