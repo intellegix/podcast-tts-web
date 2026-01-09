@@ -2583,6 +2583,7 @@ def create_interactive_job():
 
 @app.route('/api/job/<job_id>/status')
 @login_required
+@limiter.exempt  # Exempt from rate limiting - polling endpoint
 def get_interactive_job_status(job_id):
     """Get current job status and stage preview if paused"""
     job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
