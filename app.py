@@ -2407,11 +2407,16 @@ def run_stage_generate(job: Job) -> StageResult:
 
     # Generate TTS (simplified for interactive mode - runs synchronously)
     chunk_files = []
+    client = get_client()
     for idx, (chunk_text, chunk_voice, speaker) in enumerate(chunks):
         output_path = job_dir / f"chunk_{idx:04d}.mp3"
         try:
-            call_openai_tts_with_retry(chunk_text, chunk_voice, job.model, output_path)
-            chunk_files.append(output_path)
+            response = call_openai_tts_with_retry(client, job.model, chunk_voice, chunk_text)
+            response.stream_to_file(str(output_path))
+            if output_path.exists() and output_path.stat().st_size > 0:
+                chunk_files.append(output_path)
+            else:
+                logger.error(f"TTS chunk {idx} generated empty file")
         except Exception as e:
             logger.error(f"TTS chunk {idx} failed: {e}")
 
