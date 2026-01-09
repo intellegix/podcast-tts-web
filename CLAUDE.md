@@ -377,6 +377,12 @@ curl http://localhost:5000/health
   - Now calculates expansion ratio (target_words / current_words)
   - When ratio > 1.5x, sends mandatory expansion instructions to Claude
   - Claude prompt updated to allow expansion, not just polishing
+- **CRITICAL**: Guaranteed 100% topic coverage - no content skipped
+  - Topics detected in analyze stage and persisted on Job object
+  - Explicit topic list passed to Claude with "MUST COVER ALL" instruction
+  - Coverage verification after enhancement (shows covered/missing topics)
+  - Warnings displayed if any topics appear to be missing
+  - Dynamic max_tokens (8K-16K) based on content size to prevent truncation
 
 ---
 
