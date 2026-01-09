@@ -64,8 +64,8 @@ class PodcastLength(Enum):
                 'research_depth': 'thorough',
                 'detail_level': 'balanced',
                 'word_target': 2000,
-                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material comprehensively. Provide balanced coverage with good examples and context for each point. Include interesting details and ensure nothing is skipped.',
-                'enhance_instruction': 'Create natural, educational dialogue that thoroughly covers ALL topics. Include good examples for each point. Balance entertainment and information while ensuring complete coverage.'
+                'expand_instruction': 'CRITICAL: You MUST generate approximately 2000 words of dialogue (about 13 minutes of audio). Cover ALL topics comprehensively with good examples and context. Include multiple examples per topic, interesting anecdotes, and ensure thorough exploration. DO NOT be brief - expand fully.',
+                'enhance_instruction': 'Create natural, educational dialogue that is approximately 2000 words long (13 minutes of audio). Thoroughly cover ALL topics with multiple examples per point. Add explanations, analogies, and conversational depth. DO NOT shorten or summarize.'
             },
             cls.LONG: {
                 'display_name': 'Long (~15-25 min)',
@@ -74,8 +74,8 @@ class PodcastLength(Enum):
                 'research_depth': 'deep',
                 'detail_level': 'detailed',
                 'word_target': 3500,
-                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material in depth. Explore each topic thoroughly with multiple examples, analogies, and real-world applications. Add interesting tangents while ensuring every original point is well-developed.',
-                'enhance_instruction': 'Create rich, detailed dialogue that deeply explores ALL topics. Include multiple examples per topic, fun tangents, and deeper explanations. Let conversations breathe while ensuring nothing from the source is missed.'
+                'expand_instruction': 'CRITICAL: You MUST generate approximately 3500 words of dialogue (about 23 minutes of audio). Explore ALL topics in great depth with multiple examples, analogies, case studies, and real-world applications per topic. Add interesting tangents and detailed explanations. DO NOT be brief.',
+                'enhance_instruction': 'Create rich, detailed dialogue that is approximately 3500 words long (23 minutes of audio). Deeply explore ALL topics with multiple examples and anecdotes per point. Include fun tangents, deeper explanations, and let conversations breathe. DO NOT shorten.'
             },
             cls.EXTENDED: {
                 'display_name': 'Extended (~25-40 min)',
@@ -84,8 +84,8 @@ class PodcastLength(Enum):
                 'research_depth': 'exhaustive',
                 'detail_level': 'comprehensive',
                 'word_target': 6000,
-                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material exhaustively. Create comprehensive coverage with extensive examples, case studies, historical context, and expert perspectives for each point. Explore tangents and nuances while ensuring every topic is thoroughly addressed.',
-                'enhance_instruction': 'Create immersive, podcast-style dialogue with extensive exploration of ALL topics. Include multiple anecdotes, deep explanations, listener Q&A style segments, and thorough coverage of every aspect mentioned in the source material.'
+                'expand_instruction': 'CRITICAL: You MUST generate approximately 6000 words of dialogue (about 40 minutes of audio). Create exhaustive coverage with extensive examples, case studies, historical context, expert perspectives, and detailed tangents for every point. This should be a comprehensive deep-dive.',
+                'enhance_instruction': 'Create immersive, podcast-style dialogue that is approximately 6000 words long (40 minutes of audio). Include extensive exploration, multiple anecdotes per topic, deep explanations, listener Q&A style segments, and thorough coverage of every aspect. DO NOT shorten or condense.'
             }
         }
         return configs.get(length, configs[cls.MEDIUM])
