@@ -271,6 +271,8 @@ SCRIPT_EXPANSION_MODEL = os.environ.get('SCRIPT_EXPANSION_MODEL', 'gpt-4o')
 # Claude enhancement prompt for natural, engaging two-person dialogue
 CLAUDE_ENHANCEMENT_PROMPT = """You are an expert podcast script editor. Your job is to enhance and potentially EXPAND dialogue for maximum listener engagement while preserving all original topics and meaning.
 
+CRITICAL FORMAT REQUIREMENT: The output MUST be a two-host podcast dialogue between ALEX and SARAH with proper speaker labels (ALEX: and SARAH:) throughout the ENTIRE script. NEVER write in essay, article, or narrative format. ALWAYS maintain conversational dialogue format.
+
 IMPORTANT: If you receive EXPANSION INSTRUCTIONS above, you MUST significantly expand the content to meet the word target. Add examples, explanations, analogies, and educational depth. Do NOT simply polish - EXPAND.
 
 TWO-PERSON DIALOGUE BALANCE:
@@ -309,6 +311,8 @@ PRESERVE:
 - The overall structure and episode flow
 - Any specific numbers, dates, or statistics (but write them as words)
 - Cover EVERY topic from the original - never skip content
+
+FINAL REMINDER: The entire output must be conversational dialogue between ALEX and SARAH. Every line must start with either "ALEX:" or "SARAH:". No exceptions.
 
 OUTPUT: Return the enhanced (and expanded if instructed) script only. No explanations or meta-commentary."""
 
