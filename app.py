@@ -1350,12 +1350,18 @@ def enhance_episode_with_claude(episode_data):
 
         prompt_parts.append(f"\n\nEPISODE TO ENHANCE:\n{episode_text}")
 
+        # Calculate dynamic max_tokens based on expected output size
+        # Allow room for expansion: estimate ~4 tokens per word, target 3-5x expansion
+        input_words = len(episode_text.split())
+        estimated_output_tokens = max(input_words * 5 * 1.5, 8000)  # 5x expansion, 1.5 tokens/word
+        dynamic_max_tokens = min(16000, int(estimated_output_tokens))  # Cap at 16K for Claude 3.5
+
         # Try primary model, fallback to older model if not available
         model_to_use = CLAUDE_MODEL
         try:
             response = client.messages.create(
                 model=model_to_use,
-                max_tokens=8000,
+                max_tokens=dynamic_max_tokens,
                 messages=[
                     {
                         "role": "user",
@@ -2159,10 +2165,112 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
     }
 
 
+def detect_topics(text: str) -> list:
+    """Detect distinct topics/sections in the input text."""
+    topics = []
+
+    # Common topic indicators
+    topic_patterns = [
+        r'^#{1,3}\s+(.+)$',  # Markdown headers
+        r'^\*\*(.+?)\*\*\s*$',  # Bold lines as headers
+        r'^(\d+\.?\s+.{10,80})$',  # Numbered items
+        r'^[-•]\s*\*\*(.+?)\*\*',  # Bullet with bold
+        r'^Topic:\s*(.+)$',  # Explicit topic markers
+        r'(?:^|\n)([A-Z][^.!?\n]{20,80}):(?:\n|$)',  # Title-case lines ending with colon
+    ]
+
+    lines = text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        for pattern in topic_patterns:
+            match = re.match(pattern, line, re.MULTILINE)
+            if match:
+                topic = match.group(1).strip() if match.groups() else line.strip()
+                # Clean up topic
+                topic = re.sub(r'^\*\*|\*\*$', '', topic).strip()
+                topic = re.sub(r'^#+\s*', '', topic).strip()
+                if len(topic) > 10 and topic not in topics:
+                    topics.append(topic[:100])  # Limit topic length
+                break
+
+    # Fallback: if no topics detected, look for paragraph breaks with distinct subjects
+    if len(topics) < 2:
+        # Split by double newlines and extract first sentence as topic indicator
+        paragraphs = re.split(r'\n\s*\n', text)
+        for para in paragraphs:
+            first_sentence = para.strip().split('.')[0][:100]
+            if len(first_sentence) > 20 and first_sentence not in topics:
+                topics.append(first_sentence)
+
+    return topics[:20]  # Limit to 20 topics max
+
+
+def estimate_coverage_words(topics: list, input_word_count: int) -> int:
+    """Estimate words needed to adequately cover all topics."""
+    # Base: at least 150 words per distinct topic for adequate coverage
+    # Plus expansion factor for explanations, examples, dialogue
+    base_per_topic = 150
+    expansion_factor = 2.5  # Dialogue format needs ~2.5x more words than bullet points
+
+    # Minimum estimate: topics * base * expansion
+    topic_estimate = len(topics) * base_per_topic * expansion_factor
+
+    # Also consider input density - if input is already detailed, need more words
+    input_density_factor = max(1.0, input_word_count / 300)  # Scale up for longer inputs
+
+    estimated_words = max(topic_estimate, input_word_count * 3) * min(input_density_factor, 2.0)
+
+    return int(estimated_words)
+
+
+def verify_topic_coverage(final_text: str, topics: list) -> dict:
+    """
+    Verify that all detected topics are covered in the final text.
+    Returns coverage analysis with covered/missing topics.
+    """
+    if not topics:
+        return {'covered': [], 'missing': [], 'coverage_rate': 1.0, 'fully_covered': True}
+
+    final_lower = final_text.lower()
+    covered = []
+    missing = []
+
+    for topic in topics:
+        # Extract significant words from topic (4+ chars to avoid articles/prepositions)
+        topic_words = set(re.findall(r'\b\w{4,}\b', topic.lower()))
+        if not topic_words:
+            covered.append(topic)  # Empty topic words = consider covered
+            continue
+
+        # Count how many topic keywords appear in final text
+        matches = sum(1 for word in topic_words if word in final_lower)
+        coverage_pct = matches / len(topic_words)
+
+        if coverage_pct >= 0.3:  # At least 30% of topic keywords found
+            covered.append(topic)
+        else:
+            missing.append(topic)
+
+    coverage_rate = len(covered) / len(topics) if topics else 1.0
+
+    return {
+        'covered': covered,
+        'missing': missing,
+        'coverage_rate': round(coverage_rate, 2),
+        'fully_covered': len(missing) == 0
+    }
+
+
 def run_stage_analyze(job: Job) -> StageResult:
-    """Analyze stage - detect episodes, check completeness"""
+    """Analyze stage - detect episodes, check completeness, and validate length selection"""
     text = job.text
     suggestion = job.user_suggestions.get(Stage.ANALYZE, '')
+    length_config = job.get_length_config()
+    word_target = length_config['word_target']
+    length_name = length_config['display_name']
 
     # Parse episodes
     episodes = parse_episodes(text)
@@ -2171,11 +2279,51 @@ def run_stage_analyze(job: Job) -> StageResult:
     incomplete_count = sum(1 for ep in episodes if not ep['is_complete'])
     complete_count = len(episodes) - incomplete_count
 
+    # Analyze content coverage
+    input_word_count = len(text.split())
+    topics = detect_topics(text)
+    job.detected_topics = topics  # Persist topics for mandatory coverage in enhance stage
+    estimated_words_needed = estimate_coverage_words(topics, input_word_count)
+
+    # Determine if length selection is adequate
+    coverage_ratio = word_target / max(estimated_words_needed, 1)
+    length_warning = None
+    recommended_length = None
+
+    if coverage_ratio < 0.7:  # Selected length covers less than 70% of estimated needs
+        # Find recommended length
+        from job_store import PodcastLength
+        for length in [PodcastLength.EXTENDED, PodcastLength.LONG, PodcastLength.MEDIUM, PodcastLength.SHORT]:
+            cfg = PodcastLength.get_config(length)
+            if cfg['word_target'] >= estimated_words_needed * 0.8:
+                recommended_length = cfg['display_name']
+                break
+
+        if not recommended_length:
+            recommended_length = "Extended (~25-40 min)"
+
+        length_warning = f"""
+⚠️  LENGTH WARNING: Your input contains {len(topics)} distinct topics ({input_word_count} words).
+    To cover ALL topics adequately, you need approximately {estimated_words_needed:,} words.
+    Your selected length "{length_name}" targets only {word_target:,} words.
+
+    RECOMMENDATION: Select "{recommended_length}" to ensure complete coverage.
+
+    If you continue with current length, some topics may be summarized or omitted.
+
+    Detected topics:"""
+        for i, topic in enumerate(topics[:8], 1):
+            length_warning += f"\n      {i}. {topic[:70]}..."
+        if len(topics) > 8:
+            length_warning += f"\n      ... and {len(topics) - 8} more topics"
+
     # Build preview for user review
     preview_lines = [
         f"Detected {len(episodes)} episode(s):",
         f"  - {complete_count} complete (ready for processing)",
         f"  - {incomplete_count} incomplete (will be expanded)",
+        f"  - {len(topics)} distinct topics detected",
+        f"  - Input: {input_word_count} words → Target: {word_target} words",
         "",
         "Episodes found:"
     ]
@@ -2188,14 +2336,30 @@ def run_stage_analyze(job: Job) -> StageResult:
     if len(episodes) > 5:
         preview_lines.append(f"  ... and {len(episodes) - 5} more")
 
+    # Add length warning if needed
+    if length_warning:
+        preview_lines.append("")
+        preview_lines.append(length_warning)
+
     return StageResult(
         stage=Stage.ANALYZE,
         output_preview='\n'.join(preview_lines),
-        full_output={'episodes': episodes, 'text': text},
+        full_output={
+            'episodes': episodes,
+            'text': text,
+            'topics': topics,
+            'estimated_words_needed': estimated_words_needed,
+            'length_adequate': coverage_ratio >= 0.7
+        },
         metadata={
             'episode_count': len(episodes),
             'incomplete_count': incomplete_count,
-            'complete_count': complete_count
+            'complete_count': complete_count,
+            'topic_count': len(topics),
+            'input_word_count': input_word_count,
+            'estimated_words_needed': estimated_words_needed,
+            'coverage_ratio': round(coverage_ratio, 2),
+            'length_warning': length_warning is not None
         }
     )
 
@@ -2377,16 +2541,33 @@ def run_stage_enhance(job: Job) -> StageResult:
     num_episodes = len(episodes)
     words_per_episode = word_target // max(num_episodes, 1)
 
+    # Get detected topics for mandatory coverage
+    all_topics = job.detected_topics if job.detected_topics else detect_topics(text)
+    topic_list = "\n".join(f"   - {t[:80]}" for t in all_topics)
+
     # Enhance each episode
     for ep in episodes:
         ep_num = ep['episode_num']
         research = research_map.get(ep_num, '')
         ep_word_count = len(ep['text'].split())
 
-        # Build STRONG expansion instructions based on gap between current and target
+        # Build MANDATORY TOPIC COVERAGE + expansion instructions
+        mandatory_coverage = f"""
+=== MANDATORY COMPLETE COVERAGE - READ FIRST ===
+You MUST cover ALL {len(all_topics)} of the following topics in the dialogue.
+DO NOT SKIP ANY TOPIC. EVERY topic below MUST appear in your output:
+
+{topic_list}
+
+FAILURE TO COVER ANY TOPIC IS UNACCEPTABLE.
+After writing, verify EACH topic above has corresponding dialogue content.
+=== END MANDATORY COVERAGE ===
+"""
         if expansion_ratio > 1.5:
             # Need significant expansion
-            style_guidance = f"""MANDATORY EXPANSION REQUIREMENT:
+            style_guidance = f"""{mandatory_coverage}
+
+EXPANSION REQUIREMENT:
 The current content is {current_word_count} words but MUST be expanded to approximately {word_target} words.
 This episode should be approximately {words_per_episode} words (currently {ep_word_count} words).
 You MUST {expansion_ratio:.1f}x expand the content by:
@@ -2397,12 +2578,16 @@ You MUST {expansion_ratio:.1f}x expand the content by:
 5. Expanding on implications and applications of each topic
 6. Including "for example" and "think of it like" explanations throughout
 
-DO NOT just polish - you MUST significantly EXPAND the dialogue while covering all original topics.
+DO NOT just polish - you MUST significantly EXPAND the dialogue while covering ALL topics listed above.
 
 {enhance_instruction}"""
         else:
-            # Minor expansion or just polish
-            style_guidance = f"LENGTH/DETAIL GUIDANCE: {enhance_instruction}\nTarget approximately {words_per_episode} words for this episode."
+            # Minor expansion or just polish - still require ALL topics covered
+            style_guidance = f"""{mandatory_coverage}
+
+LENGTH/DETAIL GUIDANCE: {enhance_instruction}
+Target approximately {words_per_episode} words for this episode.
+Remember: ALL topics listed above MUST be covered."""
 
         if suggestion:
             style_guidance += f"\n\nADDITIONAL USER GUIDANCE: {suggestion}"
@@ -2445,12 +2630,35 @@ DO NOT just polish - you MUST significantly EXPAND the dialogue while covering a
     total_added = sum(c['words_added'] for c in all_changes)
     preview_lines.insert(1, f"Total: +{total_added} words across {len(all_changes)} episodes\n")
 
+    # Verify topic coverage - CRITICAL for ensuring no content is missed
+    coverage_result = verify_topic_coverage(final_text, all_topics)
+    final_word_count = len(final_text.split())
+
+    preview_lines.append(f"\n📊 Coverage Analysis: {final_word_count} words generated")
+    preview_lines.append(f"   Topics covered: {len(coverage_result['covered'])}/{len(all_topics)} ({coverage_result['coverage_rate']*100:.0f}%)")
+
+    if not coverage_result['fully_covered']:
+        missing_list = "\n".join(f"      ❌ {t[:70]}" for t in coverage_result['missing'][:8])
+        preview_lines.append(f"\n⚠️  WARNING: {len(coverage_result['missing'])} topics may not be adequately covered:")
+        preview_lines.append(missing_list)
+        if len(coverage_result['missing']) > 8:
+            preview_lines.append(f"      ... and {len(coverage_result['missing']) - 8} more")
+        preview_lines.append("\n💡 SUGGESTION: Add a note in the suggestion box to ensure these topics are included,")
+        preview_lines.append("   or select a longer podcast length to allow more comprehensive coverage.")
+
     return StageResult(
         stage=Stage.ENHANCE,
         output_preview='\n'.join(preview_lines),
-        full_output={'enhanced_text': final_text},
+        full_output={'enhanced_text': final_text, 'coverage': coverage_result},
         changes=all_changes,
-        metadata={'total_words_added': total_added, 'episodes_enhanced': len(all_changes)}
+        metadata={
+            'total_words_added': total_added,
+            'episodes_enhanced': len(all_changes),
+            'final_word_count': final_word_count,
+            'topics_covered': len(coverage_result['covered']),
+            'topics_missing': len(coverage_result['missing']),
+            'coverage_rate': coverage_result['coverage_rate']
+        }
     )
 
 

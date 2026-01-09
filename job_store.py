@@ -174,6 +174,7 @@ class Job:
     research_map: Dict[int, dict] = field(default_factory=dict)
     enhanced_map: Dict[int, str] = field(default_factory=dict)
     final_text: str = ""
+    detected_topics: List[str] = field(default_factory=list)  # Topics detected in analyze stage for mandatory coverage
 
     def to_dict(self) -> dict:
         """Convert job to JSON-serializable dict"""
