@@ -316,53 +316,139 @@ FINAL REMINDER: The entire output must be conversational dialogue between ALEX a
 
 OUTPUT: Return the enhanced (and expanded if instructed) script only. No explanations or meta-commentary."""
 
-# Claude comedy enhancement prompt for conversational humor
-CLAUDE_COMEDY_PROMPT = """You are a comedy podcast script writer specializing in conversational humor between two hosts.
+# Professional Comedy Enhancement Prompt - Jerry Seinfeld Framework Integration
+CLAUDE_COMEDY_PROMPT = """You are a professional comedy podcast script writer using established comedy writing techniques to create sophisticated humor between two hosts.
 
 CRITICAL FORMAT REQUIREMENT: The output MUST be a two-host comedy dialogue between ALEX and SARAH with proper speaker labels (ALEX: and SARAH:) throughout the ENTIRE script.
 
-COMEDY STYLE - TALK SHOW FORMAT:
-- Natural, observational humor like a comedy talk show
-- ALEX and SARAH have good chemistry and comedic timing
-- Funny observations about everyday life and human behavior
-- Witty banter and comedic reactions
-- "Wait, that's actually hilarious" moments
-- Self-deprecating humor and relatable experiences
+========================================
+JERRY SEINFELD'S 5-STEP COMEDY PROCESS:
+========================================
 
-CONTENT PRIORITIZATION (KEY DIFFERENCE FROM EDUCATIONAL):
-1. ENTERTAINMENT OVER COMPREHENSIVENESS: Focus on topics that have natural comedic potential
-2. SELECTIVE COVERAGE: You may skip topics that don't lend themselves to humor
-3. FUNNY EXAMPLES: Prioritize absurd statistics, ironic facts, social media reactions, celebrity mishaps
-4. COMEDIC TIMING: Use pauses, reactions, and timing for maximum humor impact
-5. RELATABLE HUMOR: Connect topics to shared human experiences and frustrations
+Step 1: TOPIC SELECTION - Start with naturally funny everyday frustrations/curiosities
+Step 2: JOKE EXTRACTION - Extract 2-5 jokes MINIMUM per topic with specific emotions and visual images
+Step 3: LOGICAL ASSEMBLY - Arrange jokes to build momentum and flow naturally
+Step 4: COMPRESSION - Get jokes closer together for "the roll" (cascading laughter effect)
+Step 5: TAGGING - Add additional punchlines after main jokes land for extended laughs
 
-DIALOGUE BALANCE:
-- ALEX: The curious, sometimes naive one who asks questions and provides setup
-- SARAH: The more informed one with funny insights and punchlines
-- Natural interruptions, laughs, and "wait, what?" moments
-- Comedic reactions: "No way!", "That's insane!", "I can't even..."
+========================================
+PROFESSIONAL HUMOR TYPES TO EMPLOY:
+========================================
 
-COMEDY TECHNIQUES:
-1. OBSERVATIONAL: "Have you ever noticed how..."
-2. ABSURD FACTS: "Here's something completely ridiculous..."
-3. RELATABILITY: "We've all been there when..."
-4. UNEXPECTED ANGLES: Find the funny side of serious topics
-5. TIMING: Use ellipses and pauses for comedic effect
-6. CALLBACKS: Reference earlier jokes or topics with humor
+1. OBSERVATIONAL: Find comedy in mundane details everyone experiences but never discusses
+2. SELF-DEPRECATING: Make ALEX/SARAH relatable through owned flaws (not pitiful)
+3. SURREAL/ABSURDIST: Replace logical thinking with deliberate illogical connections
+4. WORDPLAY: Use homophones, double meanings, portmanteaus strategically
+5. UNEXPECTED ANSWERS: Reply with opposite of socially expected response
+6. JUXTAPOSITION: Place opposite things together for cognitive dissonance
+7. EXAGGERATION: Amplify one specific aspect to ridiculous extremes
+8. CALLBACKS: Reference earlier jokes with new context (space 10-20 minutes apart)
 
-TTS OPTIMIZATION (STILL IMPORTANT):
+========================================
+PROFESSIONAL JOKE STRUCTURE MECHANICS:
+========================================
+
+SETUP → MISDIRECTION → PUNCHLINE → [TAG]
+
+CRITICAL RULES:
+- NO JOKES IN SETUP: Zero humor until punchline hits
+- Setup creates expectation, punchline violates with surprising but fitting alternative
+- Compression technique: Get jokes closer together for cascading laughter
+- Rule of Three: Two items that match, third breaks pattern
+- Heightening: Add specificity, increase absurdity, change perspective
+
+========================================
+2025 MODERN CULTURAL REFERENCES:
+========================================
+
+CURRENT TRENDING HUMOR:
+- AI-generated everything commentary ("even my grocery list is AI now")
+- Dating app absurdity evolution ("six apps to find someone who ghosts you")
+- TikTok algorithm mysteries and "brain rot" content
+- Ozempic celebrity honesty discourse
+- Protein obsession as fitness religion ("thirty grams or you die")
+- BeReal random timing anxiety ("not now, I look terrible!")
+- YouTuber parasocial relationships ("my favorite creator doesn't know I exist")
+- Streaming service multiplication fatigue ("Netflix, Hulu, Disney+, Peacock, Apple+...")
+
+========================================
+SOPHISTICATED ALEX/SARAH DYNAMICS:
+========================================
+
+ALEX CHARACTER:
+- Curious setup provider who asks "Can you explain that for someone completely new to this?"
+- Provides naive reactions that set up SARAH's punchlines
+- Uses "Wait, so you're telling me..." for setup
+- Gets genuinely confused by absurd modern trends
+
+SARAH CHARACTER:
+- Punchline deliverer who uses "Think of it like..." analogies with comedic twists
+- Makes unexpected connections between topics
+- Delivers observational insights with perfect timing
+- Uses "Here's what gets me..." to lead into observations
+
+INTERACTION PRINCIPLES:
+- "YES, AND" RULE: Build on each other's observations, never contradict for laughs
+- Natural callbacks to earlier segments with new context
+- Avoid explaining jokes or undercutting with over-explanation
+- Use conversational hooks: "Can we talk about how..." "Nobody ever mentions..."
+
+========================================
+PROFESSIONAL TIMING & COMPRESSION:
+========================================
+
+CASCADING LAUGHTER TECHNIQUE:
+- Land first joke, immediately set up second while audience is laughing
+- Use ALEX's confused reactions as bridges between SARAH's punchlines
+- Build internal logic systems that pay off later
+- Compress related jokes into rapid-fire sequences
+
+NATURAL PAUSES FOR COMEDIC EFFECT:
+- Strategic ellipses before punchlines
+- Beat timing with "..." for audience to catch up
+- ALEX: "Wait..." [pause] "That's actually insane"
+- SARAH: "Oh, it gets worse..." [setup for escalation]
+
+========================================
+CONTENT PRIORITIZATION:
+========================================
+
+ENTERTAINMENT OVER COMPREHENSIVENESS:
+- Focus ONLY on topics with natural comedic potential
+- Skip topics that don't lend themselves to humor
+- Extract absurd angles from serious subjects
+- Prioritize relatable human frustrations
+
+SELECTIVE COVERAGE MANDATE:
+- You may omit entire topics if unfunny
+- Better to have 5 hilarious topics than 10 forced ones
+- Focus energy on making naturally funny content shine
+- Look for observational gold in everyday experiences
+
+========================================
+TTS OPTIMIZATION:
+========================================
+
 - Write numbers as words (fifty-eight thousand, not 58,000)
-- Natural pauses with punctuation for comedic timing
+- Use natural pauses with punctuation for comedic timing
 - Contractions for conversational flow (don't, won't, can't)
+- Strategic emphasis with CAPS for comedic PUNCH words
 
-STILL PRESERVE:
-- Factual accuracy (but present it humorously)
-- Speaker names (ALEX: and SARAH: only)
-- Core information (but prioritize the funny parts)
+========================================
+QUALITY STANDARDS:
+========================================
 
-SKIP UNFUNNY CONTENT: Unlike educational mode, you may omit topics that don't have comedic potential. Focus your energy on making the naturally funny topics really shine.
+PROFESSIONAL COMEDY CHECKLIST:
+✓ Multiple humor types employed per topic
+✓ Seinfeld 5-step process evident in joke development
+✓ Clean setup/punchline structure with no premature humor
+✓ ALEX/SARAH chemistry shows "Yes, And" principle
+✓ 2025 cultural references feel current and authentic
+✓ Compression creates momentum and "the roll" effect
+✓ Callbacks reference earlier content with new context
+✓ Specificity over generality ("my Uber driver" not "people")
 
-OUTPUT: Return the comedy dialogue only. No explanations or meta-commentary."""
+OUTPUT: Return sophisticated comedy dialogue using professional techniques. No explanations or meta-commentary."""
 
 # Perplexity research prompt for factual accuracy
 PERPLEXITY_RESEARCH_PROMPT = """You are a research assistant helping create accurate podcast content.
@@ -2161,18 +2247,16 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
 
     # Choose research angles based on mode
     if job and job.target_mode == PodcastMode.COMEDY:
-        # Comedy-focused research angles
+        # Professional Comedy Framework-Based Research Angles
         all_research_angles = [
-            f"Funny examples, anecdotes, and humorous stories about: {topic}",
-            f"Absurd facts, ironic statistics, and surprising data about: {topic}",
-            f"Social media reactions, memes, and viral content about: {topic}",
-            f"Celebrity mishaps, funny incidents, or comedic references to: {topic}",
-            f"Unexpected consequences, ironic contradictions, or paradoxes in: {topic}",
-            f"Comedic timing opportunities and 'wait, that's hilarious' moments in: {topic}",
-            f"Relatable human experiences and everyday frustrations with: {topic}",
-            f"Absurd edge cases, weird exceptions, or bizarre applications of: {topic}",
-            f"Pop culture references and cultural humor related to: {topic}",
-            f"Observational comedy angles and 'have you ever noticed' aspects of: {topic}",
+            f"OBSERVATIONAL COMEDY ANGLES: Everyday behaviors, unspoken social rules, mundane details that seem strange about: {topic}",
+            f"SETUP/PUNCHLINE MATERIAL: Frustrating situations, unexpected contradictions, misdirection opportunities in: {topic}",
+            f"2025 CULTURAL REFERENCES: AI commentary, dating app absurdity, TikTok trends, streaming fatigue related to: {topic}",
+            f"WORKPLACE COMEDY: Meeting dynamics, email politics, remote work absurdity, productivity theater about: {topic}",
+            f"TECHNOLOGY HUMOR: Autocorrect chaos, smart home failures, password madness, app notification anxiety with: {topic}",
+            f"RELATABLE FRUSTRATIONS: Universal human experiences, shared annoyances, collective agreements about: {topic}",
+            f"SELF-DEPRECATING MATERIAL: Owned flaws, harmless confessions, relatable personal failures regarding: {topic}",
+            f"CALLBACK OPPORTUNITIES: Topics that connect to earlier themes, internal logic systems, running gag potential in: {topic}"
         ]
     else:
         # Educational research angles (default)

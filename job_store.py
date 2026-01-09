@@ -108,9 +108,31 @@ class PodcastLength(Enum):
 
         # Apply mode-specific customizations
         if mode == PodcastMode.COMEDY:
-            # Comedy mode: entertainment-focused, can skip unfunny topics
+            # Comedy mode: length-specific professional comedy techniques
             word_target = config.get('word_target', 2000)
-            config['enhance_instruction'] = f'Create comedy talk show dialogue between ALEX and SARAH (~{word_target} words). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. PRIORITIZE ENTERTAINMENT - conversational humor, funny observations, witty banter, and comedic timing. You may SKIP topics that don\'t lend themselves to humor - focus on naturally funny topics for better entertainment value. Include comedic reactions, observational humor, and "wait, that\'s actually hilarious" moments.'
+
+            # Length-specific comedy technique specialization
+            if length == cls.QUICK:
+                # Quick (3-5 min): Focus on observational humor, rapid-fire observations
+                config['enhance_instruction'] = f'Create comedy talk show dialogue between ALEX and SARAH (~{word_target} words). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. Apply Seinfeld Steps 1-3: Start with naturally funny topics, extract 2-3 jokes per topic, assemble logically. Use OBSERVATIONAL COMEDY and quick setup/punchline structures. Focus on "Have you ever noticed..." observations and immediate punchlines. Keep pace fast and punchy.'
+            elif length == cls.SHORT:
+                # Short (5-10 min): Add wordplay and better timing
+                config['enhance_instruction'] = f'Create comedy talk show dialogue between ALEX and SARAH (~{word_target} words). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. Apply Seinfeld Steps 1-4: Include observational humor, wordplay, and unexpected answers. Use setup/punchline structure with misdirection. Add comedic timing with pauses. ALEX provides setups, SARAH delivers punchlines.'
+            elif length == cls.MEDIUM:
+                # Medium (10-15 min): Full Seinfeld process, callbacks, character development
+                config['enhance_instruction'] = f'Create comedy talk show dialogue between ALEX and SARAH (~{word_target} words). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. Apply FULL Seinfeld 5-step process. Include observational, wordplay, juxtaposition, and exaggeration. Develop ALEX/SARAH chemistry with callbacks to earlier topics. Use compression technique for cascading laughter. Include 2025 cultural references.'
+            elif length == cls.LONG:
+                # Long (15-25 min): Advanced humor types, extensive callbacks
+                config['enhance_instruction'] = f'Create comedy talk show dialogue between ALEX and SARAH (~{word_target} words). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. Use MULTIPLE humor types: observational, self-deprecating, surreal, wordplay, unexpected answers, juxtaposition. Extensive callback development with internal logic systems. Apply compression technique and heightening. Include 2025 cultural references and sophisticated character dynamics.'
+            elif length == cls.EXTENDED:
+                # Extended (25-40 min): Full professional comedy toolkit
+                config['enhance_instruction'] = f'Create comedy talk show dialogue between ALEX and SARAH (~{word_target} words). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. Use ALL 8 professional humor types extensively. Apply full Seinfeld 5-step process with sophisticated compression technique for "the roll" of cascading laughter. Extensive callback development, advanced character dynamics with "Yes, And" principle. Include comprehensive 2025 cultural integration. Create professional-grade comedy using established techniques.'
+            elif length == cls.COMPREHENSIVE:
+                # Comprehensive: Maximum professional comedy development
+                config['enhance_instruction'] = f'Create comprehensive comedy talk show dialogue between ALEX and SARAH. CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. Apply MAXIMUM professional comedy development using ALL humor types, full Seinfeld process, extensive callbacks, sophisticated character chemistry, and comprehensive 2025 cultural integration. No time limit - length determined by comedic potential. Professional-grade sophisticated humor throughout.'
+            else:
+                # Default fallback
+                config['enhance_instruction'] = f'Create comedy talk show dialogue between ALEX and SARAH (~{word_target} words). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. Apply professional comedy techniques with entertainment focus.'
         else:
             # Educational mode: comprehensive coverage, all topics required
             # Keep existing educational enhance_instruction as-is
@@ -148,14 +170,14 @@ class PodcastMode(Enum):
                 'description': 'Conversational comedy between ALEX and SARAH',
                 'topic_coverage_required': False,  # Key difference - can skip unfunny topics
                 'research_angles': [
-                    'funny_examples_anecdotes',
-                    'absurd_facts_statistics',
-                    'social_media_reactions',
-                    'celebrity_mishaps_stories',
-                    'memes_cultural_references',
-                    'ironic_contradictions',
-                    'unexpected_consequences',
-                    'comedic_timing_opportunities'
+                    'observational_comedy_angles',
+                    'setup_punchline_material',
+                    '2025_cultural_references',
+                    'workplace_comedy_angles',
+                    'technology_humor_angles',
+                    'relatable_frustrations',
+                    'self_deprecating_material',
+                    'callback_opportunities'
                 ]
             }
         }
