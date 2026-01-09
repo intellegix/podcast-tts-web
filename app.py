@@ -733,6 +733,12 @@ def detect_gender(name):
     # Extract first word of name (e.g., "Guest Expert" -> "guest")
     first_name = name.lower().split()[0]
 
+    # Hardcoded voice assignments for primary podcast hosts
+    if first_name == 'sarah':
+        return 'female'
+    elif first_name == 'alex':
+        return 'male'
+
     if first_name in MALE_NAMES:
         return 'male'
     elif first_name in FEMALE_NAMES:
