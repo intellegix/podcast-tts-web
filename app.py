@@ -43,7 +43,7 @@ from gevent.pool import Pool as GeventPool
 from gevent.lock import RLock
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from apscheduler.schedulers.background import BackgroundScheduler
-from job_store import job_store, Job, JobStatus, Stage, StageResult
+from job_store import job_store, Job, JobStatus, Stage, StageResult, PodcastLength
 
 # Configure logging (structured format)
 logging.basicConfig(
@@ -2039,7 +2039,7 @@ def health():
 MIN_RESEARCH_AGENTS = 5  # Always spawn at least 5 parallel Perplexity agents
 
 
-def research_episode_parallel(episode_data: dict, user_suggestion: str = "") -> dict:
+def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num_agents: int = 5, research_depth: str = "thorough") -> dict:
     """
     Research a single episode with MULTIPLE parallel Perplexity agents.
     Each agent researches a different angle for comprehensive coverage.
@@ -2047,6 +2047,8 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "") -> 
     Args:
         episode_data: Episode dict with 'text', 'header', 'episode_num'
         user_suggestion: Optional user guidance to focus research
+        num_agents: Number of parallel research agents to use (based on podcast length)
+        research_depth: Research depth level (surface, moderate, thorough, deep, exhaustive)
 
     Returns:
         Dict with combined research, citations, agent count
@@ -2060,19 +2062,29 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "") -> 
         logger.debug(f"Episode {episode_num}: No Perplexity API key")
         return {'episode_num': episode_num, 'research': '', 'citations': [], 'success': False, 'agent_count': 0}
 
-    # Generate multiple research angles
-    research_angles = [
+    # All possible research angles - select based on num_agents
+    all_research_angles = [
         f"Key statistics and quantitative data about: {topic}",
         f"Recent news and developments (2024-2025) about: {topic}",
         f"Expert opinions and analysis on: {topic}",
         f"Real-world examples and case studies of: {topic}",
         f"Common misconceptions or surprising facts about: {topic}",
+        f"Historical context and evolution of: {topic}",
+        f"Future trends and predictions for: {topic}",
+        f"Contrasting viewpoints and debates about: {topic}",
+        f"Practical applications and how-to aspects of: {topic}",
+        f"Impact on society, economy, or culture of: {topic}",
     ]
+
+    # Select the number of angles based on target podcast length
+    research_angles = all_research_angles[:num_agents]
 
     # Add user suggestion as additional focus if provided
     if user_suggestion:
         research_angles.append(f"{user_suggestion} regarding: {topic}")
         logger.info(f"Episode {episode_num}: Added user focus - {user_suggestion[:50]}...")
+
+    logger.info(f"Episode {episode_num}: Using {len(research_angles)} research agents ({research_depth} depth)")
 
     def query_single_angle(angle: str) -> dict:
         """Query Perplexity for a single research angle"""
@@ -2181,6 +2193,9 @@ def run_stage_research(job: Job) -> StageResult:
     """Research stage - parallel multi-agent Perplexity research"""
     episodes = job.episodes
     suggestion = job.user_suggestions.get(Stage.RESEARCH, '')
+    length_config = job.get_length_config()
+    num_agents = length_config['research_agents']
+    research_depth = length_config['research_depth']
 
     if not episodes:
         return StageResult(
@@ -2195,12 +2210,12 @@ def run_stage_research(job: Job) -> StageResult:
     research_map = {}
     total_agents = 0
 
-    preview_lines = [f"Research complete using {MIN_RESEARCH_AGENTS}+ parallel agents per episode:\n"]
+    preview_lines = [f"Research complete using {num_agents} parallel agents per episode ({research_depth} depth):\n"]
 
     # Research each episode (in parallel across episodes too)
     episode_pool = GeventPool(size=min(5, len(episodes)))
     research_results = list(episode_pool.imap_unordered(
-        lambda ep: research_episode_parallel(ep, suggestion),
+        lambda ep: research_episode_parallel(ep, suggestion, num_agents, research_depth),
         episodes
     ))
 
@@ -2242,6 +2257,9 @@ def run_stage_expand(job: Job) -> StageResult:
     episodes = job.episodes
     research_map = job.research_map
     suggestion = job.user_suggestions.get(Stage.EXPAND, '')
+    length_config = job.get_length_config()
+    word_target = length_config['word_target']
+    expand_instruction = length_config['expand_instruction']
 
     incomplete = [ep for ep in episodes if not ep['is_complete']]
 
@@ -2257,16 +2275,16 @@ def run_stage_expand(job: Job) -> StageResult:
         )
 
     expanded_map = {}
-    preview_lines = [f"Expanding {len(incomplete)} incomplete episode(s):\n"]
+    preview_lines = [f"Expanding {len(incomplete)} incomplete episode(s) (target: ~{word_target} words):\n"]
 
     for ep in incomplete:
         ep_num = ep['episode_num']
         research_context = research_map.get(ep_num, '')
 
-        # Add user suggestion to expansion context
-        style_guidance = ""
+        # Add user suggestion and length guidance to expansion context
+        style_guidance = f"\n\nLENGTH GUIDANCE: {expand_instruction} Target approximately {word_target} words total."
         if suggestion:
-            style_guidance = f"\n\nUSER GUIDANCE: {suggestion}"
+            style_guidance += f"\n\nUSER GUIDANCE: {suggestion}"
 
         try:
             expanded = expand_script_with_ai(
@@ -2319,6 +2337,10 @@ def run_stage_enhance(job: Job) -> StageResult:
     episodes = parse_episodes(text)
     research_map = job.research_map
     suggestion = job.user_suggestions.get(Stage.ENHANCE, '')
+    length_config = job.get_length_config()
+    enhance_instruction = length_config['enhance_instruction']
+    detail_level = length_config['detail_level']
+    word_target = length_config['word_target']
 
     if not CLAUDE_API_KEY:
         return StageResult(
@@ -2330,15 +2352,17 @@ def run_stage_enhance(job: Job) -> StageResult:
 
     all_changes = []
     enhanced_map = {}
-    preview_lines = ["Claude enhancement complete:\n"]
+    preview_lines = [f"Claude enhancement complete ({detail_level} detail, ~{word_target} words target):\n"]
 
     # Enhance each episode
     for ep in episodes:
         ep_num = ep['episode_num']
         research = research_map.get(ep_num, '')
 
-        # Add user style guidance
-        style_guidance = suggestion if suggestion else ""
+        # Combine length guidance with user suggestion
+        style_guidance = f"LENGTH/DETAIL GUIDANCE: {enhance_instruction}"
+        if suggestion:
+            style_guidance += f"\n\nADDITIONAL USER GUIDANCE: {suggestion}"
 
         result = enhance_episode_with_claude({
             'episode_num': ep_num,
@@ -2563,6 +2587,13 @@ def create_interactive_job():
     if len(text) > MAX_TEXT_LENGTH:
         return jsonify({'error': f'Text too large. Maximum {MAX_TEXT_LENGTH//(1024*1024)}MB allowed.'}), 400
 
+    # Parse target length
+    length_str = request.form.get('target_length', 'medium').lower()
+    try:
+        target_length = PodcastLength(length_str)
+    except ValueError:
+        target_length = PodcastLength.MEDIUM
+
     # Create job
     job = Job(
         id=generate_job_id(),
@@ -2573,8 +2604,12 @@ def create_interactive_job():
         model=request.form.get('model', 'tts-1-hd'),
         multi_voice=request.form.get('multi_voice', 'true').lower() == 'true',
         ai_enhance=request.form.get('ai_enhance', 'true').lower() == 'true',
-        auto_expand=request.form.get('auto_expand', 'true').lower() == 'true'
+        auto_expand=request.form.get('auto_expand', 'true').lower() == 'true',
+        target_length=target_length
     )
+
+    length_config = job.get_length_config()
+    logger.info(f"Job {job.id}: Target length={target_length.value}, research_agents={length_config['research_agents']}")
 
     job_store.create_job(job)
     logger.info(f"Job {job.id}: Created interactive pipeline job")

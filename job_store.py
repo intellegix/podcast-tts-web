@@ -24,6 +24,73 @@ class JobStatus(Enum):
     ERROR = "error"
 
 
+class PodcastLength(Enum):
+    """Target podcast length options"""
+    QUICK = "quick"      # ~3-5 minutes - brief summary
+    SHORT = "short"      # ~5-10 minutes - concise coverage
+    MEDIUM = "medium"    # ~10-15 minutes - balanced detail
+    LONG = "long"        # ~15-25 minutes - in-depth exploration
+    EXTENDED = "extended"  # ~25-40 minutes - comprehensive deep-dive
+
+    @classmethod
+    def get_config(cls, length: 'PodcastLength') -> dict:
+        """Get configuration parameters for each length option"""
+        # IMPORTANT: All configs emphasize covering ALL topics - length only affects detail level
+        configs = {
+            cls.QUICK: {
+                'display_name': 'Quick (~3-5 min)',
+                'description': 'Brief summary, key points only',
+                'research_agents': 3,
+                'research_depth': 'surface',
+                'detail_level': 'minimal',
+                'word_target': 600,
+                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material - do not skip anything. Keep explanations brief but touch on every single point mentioned. Summarize each topic in 1-2 sentences. No tangents, but ensure complete coverage.',
+                'enhance_instruction': 'Create a quick, punchy dialogue that covers ALL topics. Get to the point fast. Minimal banter but ensure every topic from the source is mentioned, even briefly.'
+            },
+            cls.SHORT: {
+                'display_name': 'Short (~5-10 min)',
+                'description': 'Concise coverage of main topics',
+                'research_agents': 4,
+                'research_depth': 'moderate',
+                'detail_level': 'concise',
+                'word_target': 1200,
+                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material - do not skip anything. Keep explanations concise with 1 brief example per major topic. Every point mentioned in the source must appear in the output.',
+                'enhance_instruction': 'Create engaging but efficient dialogue that covers ALL topics. Include 1-2 examples per topic. Every point from the source must be addressed, even if briefly.'
+            },
+            cls.MEDIUM: {
+                'display_name': 'Medium (~10-15 min)',
+                'description': 'Balanced detail and engagement',
+                'research_agents': 5,
+                'research_depth': 'thorough',
+                'detail_level': 'balanced',
+                'word_target': 2000,
+                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material comprehensively. Provide balanced coverage with good examples and context for each point. Include interesting details and ensure nothing is skipped.',
+                'enhance_instruction': 'Create natural, educational dialogue that thoroughly covers ALL topics. Include good examples for each point. Balance entertainment and information while ensuring complete coverage.'
+            },
+            cls.LONG: {
+                'display_name': 'Long (~15-25 min)',
+                'description': 'In-depth exploration with examples',
+                'research_agents': 6,
+                'research_depth': 'deep',
+                'detail_level': 'detailed',
+                'word_target': 3500,
+                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material in depth. Explore each topic thoroughly with multiple examples, analogies, and real-world applications. Add interesting tangents while ensuring every original point is well-developed.',
+                'enhance_instruction': 'Create rich, detailed dialogue that deeply explores ALL topics. Include multiple examples per topic, fun tangents, and deeper explanations. Let conversations breathe while ensuring nothing from the source is missed.'
+            },
+            cls.EXTENDED: {
+                'display_name': 'Extended (~25-40 min)',
+                'description': 'Comprehensive deep-dive',
+                'research_agents': 8,
+                'research_depth': 'exhaustive',
+                'detail_level': 'comprehensive',
+                'word_target': 6000,
+                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material exhaustively. Create comprehensive coverage with extensive examples, case studies, historical context, and expert perspectives for each point. Explore tangents and nuances while ensuring every topic is thoroughly addressed.',
+                'enhance_instruction': 'Create immersive, podcast-style dialogue with extensive exploration of ALL topics. Include multiple anecdotes, deep explanations, listener Q&A style segments, and thorough coverage of every aspect mentioned in the source material.'
+            }
+        }
+        return configs.get(length, configs[cls.MEDIUM])
+
+
 class Stage(Enum):
     """Pipeline stages in order"""
     ANALYZE = "analyze"
@@ -85,6 +152,11 @@ class Job:
     multi_voice: bool
     ai_enhance: bool
     auto_expand: bool
+    target_length: PodcastLength = PodcastLength.MEDIUM
+
+    def get_length_config(self) -> dict:
+        """Get configuration for current target length"""
+        return PodcastLength.get_config(self.target_length)
 
     # Results and suggestions
     stage_results: Dict[Stage, StageResult] = field(default_factory=dict)

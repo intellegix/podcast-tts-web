@@ -104,6 +104,55 @@
                     </small>
                 </div>
 
+                <div class="form-section length-section">
+                    <label for="target_length">Podcast Length:</label>
+                    <div class="length-options">
+                        <label class="length-option" data-length="quick">
+                            <input type="radio" name="target_length" value="quick">
+                            <div class="length-card">
+                                <span class="length-time">3-5 min</span>
+                                <span class="length-name">Quick</span>
+                                <span class="length-desc">Key points only</span>
+                            </div>
+                        </label>
+                        <label class="length-option" data-length="short">
+                            <input type="radio" name="target_length" value="short">
+                            <div class="length-card">
+                                <span class="length-time">5-10 min</span>
+                                <span class="length-name">Short</span>
+                                <span class="length-desc">Concise coverage</span>
+                            </div>
+                        </label>
+                        <label class="length-option" data-length="medium">
+                            <input type="radio" name="target_length" value="medium" checked>
+                            <div class="length-card">
+                                <span class="length-time">10-15 min</span>
+                                <span class="length-name">Medium</span>
+                                <span class="length-desc">Balanced detail</span>
+                            </div>
+                        </label>
+                        <label class="length-option" data-length="long">
+                            <input type="radio" name="target_length" value="long">
+                            <div class="length-card">
+                                <span class="length-time">15-25 min</span>
+                                <span class="length-name">Long</span>
+                                <span class="length-desc">In-depth exploration</span>
+                            </div>
+                        </label>
+                        <label class="length-option" data-length="extended">
+                            <input type="radio" name="target_length" value="extended">
+                            <div class="length-card">
+                                <span class="length-time">25-40 min</span>
+                                <span class="length-name">Extended</span>
+                                <span class="length-desc">Comprehensive deep-dive</span>
+                            </div>
+                        </label>
+                    </div>
+                    <small class="length-hint">
+                        Controls detail level and examples - ALL topics are always covered. Shorter = concise summaries, Longer = in-depth exploration with more research agents.
+                    </small>
+                </div>
+
                 <button type="submit" id="generate-btn">
                     <span class="btn-text">Generate Audio</span>
                     <span class="btn-icon">&#9658;</span>
