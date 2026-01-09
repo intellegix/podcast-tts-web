@@ -45,7 +45,7 @@ from gevent.pool import Pool as GeventPool
 from gevent.lock import RLock
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from apscheduler.schedulers.background import BackgroundScheduler
-from job_store import job_store, Job, JobStatus, Stage, StageResult, PodcastLength
+from job_store import job_store, Job, JobStatus, Stage, StageResult, PodcastLength, PodcastMode
 
 # Configure logging (structured format)
 logging.basicConfig(
@@ -315,6 +315,54 @@ PRESERVE:
 FINAL REMINDER: The entire output must be conversational dialogue between ALEX and SARAH. Every line must start with either "ALEX:" or "SARAH:". No exceptions.
 
 OUTPUT: Return the enhanced (and expanded if instructed) script only. No explanations or meta-commentary."""
+
+# Claude comedy enhancement prompt for conversational humor
+CLAUDE_COMEDY_PROMPT = """You are a comedy podcast script writer specializing in conversational humor between two hosts.
+
+CRITICAL FORMAT REQUIREMENT: The output MUST be a two-host comedy dialogue between ALEX and SARAH with proper speaker labels (ALEX: and SARAH:) throughout the ENTIRE script.
+
+COMEDY STYLE - TALK SHOW FORMAT:
+- Natural, observational humor like a comedy talk show
+- ALEX and SARAH have good chemistry and comedic timing
+- Funny observations about everyday life and human behavior
+- Witty banter and comedic reactions
+- "Wait, that's actually hilarious" moments
+- Self-deprecating humor and relatable experiences
+
+CONTENT PRIORITIZATION (KEY DIFFERENCE FROM EDUCATIONAL):
+1. ENTERTAINMENT OVER COMPREHENSIVENESS: Focus on topics that have natural comedic potential
+2. SELECTIVE COVERAGE: You may skip topics that don't lend themselves to humor
+3. FUNNY EXAMPLES: Prioritize absurd statistics, ironic facts, social media reactions, celebrity mishaps
+4. COMEDIC TIMING: Use pauses, reactions, and timing for maximum humor impact
+5. RELATABLE HUMOR: Connect topics to shared human experiences and frustrations
+
+DIALOGUE BALANCE:
+- ALEX: The curious, sometimes naive one who asks questions and provides setup
+- SARAH: The more informed one with funny insights and punchlines
+- Natural interruptions, laughs, and "wait, what?" moments
+- Comedic reactions: "No way!", "That's insane!", "I can't even..."
+
+COMEDY TECHNIQUES:
+1. OBSERVATIONAL: "Have you ever noticed how..."
+2. ABSURD FACTS: "Here's something completely ridiculous..."
+3. RELATABILITY: "We've all been there when..."
+4. UNEXPECTED ANGLES: Find the funny side of serious topics
+5. TIMING: Use ellipses and pauses for comedic effect
+6. CALLBACKS: Reference earlier jokes or topics with humor
+
+TTS OPTIMIZATION (STILL IMPORTANT):
+- Write numbers as words (fifty-eight thousand, not 58,000)
+- Natural pauses with punctuation for comedic timing
+- Contractions for conversational flow (don't, won't, can't)
+
+STILL PRESERVE:
+- Factual accuracy (but present it humorously)
+- Speaker names (ALEX: and SARAH: only)
+- Core information (but prioritize the funny parts)
+
+SKIP UNFUNNY CONTENT: Unlike educational mode, you may omit topics that don't have comedic potential. Focus your energy on making the naturally funny topics really shine.
+
+OUTPUT: Return the comedy dialogue only. No explanations or meta-commentary."""
 
 # Perplexity research prompt for factual accuracy
 PERPLEXITY_RESEARCH_PROMPT = """You are a research assistant helping create accurate podcast content.
@@ -1328,6 +1376,7 @@ def enhance_episode_with_claude(episode_data):
     speakers = episode_data.get('speakers', [])
     research_context = episode_data.get('research', '')  # Get research separately
     style_guidance = episode_data.get('style_guidance', '')  # Length/expansion instructions
+    job = episode_data.get('job')  # Get job object for mode-specific processing
 
     # Check if Claude is configured
     client = get_claude_client()
@@ -1354,7 +1403,15 @@ def enhance_episode_with_claude(episode_data):
         if style_guidance:
             prompt_parts.append(f"CRITICAL INSTRUCTION - READ FIRST:\n{style_guidance}\n\n")
 
-        prompt_parts.append(CLAUDE_ENHANCEMENT_PROMPT)
+        # Choose prompt based on mode
+        if job and job.target_mode == PodcastMode.COMEDY:
+            base_prompt = CLAUDE_COMEDY_PROMPT
+            topic_coverage_required = False
+        else:
+            base_prompt = CLAUDE_ENHANCEMENT_PROMPT
+            topic_coverage_required = True
+
+        prompt_parts.append(base_prompt)
         prompt_parts.append(f"\n\nSPEAKERS: {speaker_list}")
 
         if research_context:
@@ -2079,7 +2136,7 @@ def health():
 MIN_RESEARCH_AGENTS = 5  # Always spawn at least 5 parallel Perplexity agents
 
 
-def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num_agents: int = 5, research_depth: str = "thorough") -> dict:
+def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num_agents: int = 5, research_depth: str = "thorough", job: Job = None) -> dict:
     """
     Research a single episode with MULTIPLE parallel Perplexity agents.
     Each agent researches a different angle for comprehensive coverage.
@@ -2102,19 +2159,35 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
         logger.debug(f"Episode {episode_num}: No Perplexity API key")
         return {'episode_num': episode_num, 'research': '', 'citations': [], 'success': False, 'agent_count': 0}
 
-    # All possible research angles - select based on num_agents
-    all_research_angles = [
-        f"Key statistics and quantitative data about: {topic}",
-        f"Recent news and developments (2024-2025) about: {topic}",
-        f"Expert opinions and analysis on: {topic}",
-        f"Real-world examples and case studies of: {topic}",
-        f"Common misconceptions or surprising facts about: {topic}",
-        f"Historical context and evolution of: {topic}",
-        f"Future trends and predictions for: {topic}",
-        f"Contrasting viewpoints and debates about: {topic}",
-        f"Practical applications and how-to aspects of: {topic}",
-        f"Impact on society, economy, or culture of: {topic}",
-    ]
+    # Choose research angles based on mode
+    if job and job.target_mode == PodcastMode.COMEDY:
+        # Comedy-focused research angles
+        all_research_angles = [
+            f"Funny examples, anecdotes, and humorous stories about: {topic}",
+            f"Absurd facts, ironic statistics, and surprising data about: {topic}",
+            f"Social media reactions, memes, and viral content about: {topic}",
+            f"Celebrity mishaps, funny incidents, or comedic references to: {topic}",
+            f"Unexpected consequences, ironic contradictions, or paradoxes in: {topic}",
+            f"Comedic timing opportunities and 'wait, that's hilarious' moments in: {topic}",
+            f"Relatable human experiences and everyday frustrations with: {topic}",
+            f"Absurd edge cases, weird exceptions, or bizarre applications of: {topic}",
+            f"Pop culture references and cultural humor related to: {topic}",
+            f"Observational comedy angles and 'have you ever noticed' aspects of: {topic}",
+        ]
+    else:
+        # Educational research angles (default)
+        all_research_angles = [
+            f"Key statistics and quantitative data about: {topic}",
+            f"Recent news and developments (2024-2025) about: {topic}",
+            f"Expert opinions and analysis on: {topic}",
+            f"Real-world examples and case studies of: {topic}",
+            f"Common misconceptions or surprising facts about: {topic}",
+            f"Historical context and evolution of: {topic}",
+            f"Future trends and predictions for: {topic}",
+            f"Contrasting viewpoints and debates about: {topic}",
+            f"Practical applications and how-to aspects of: {topic}",
+            f"Impact on society, economy, or culture of: {topic}",
+        ]
 
     # Select the number of angles based on target podcast length
     research_angles = all_research_angles[:num_agents]
@@ -2654,7 +2727,7 @@ def run_stage_research(job: Job) -> StageResult:
     # Research each episode (in parallel across episodes too)
     episode_pool = GeventPool(size=min(5, len(episodes)))
     research_results = list(episode_pool.imap_unordered(
-        lambda ep: research_episode_parallel(ep, suggestion, num_agents, research_depth),
+        lambda ep: research_episode_parallel(ep, suggestion, num_agents, research_depth, job),
         episodes
     ))
 
@@ -2911,7 +2984,8 @@ Remember: ALL topics listed above MUST be covered."""
             'text': ep['text'],
             'research': research,
             'speakers': ['ALEX', 'SARAH'],
-            'style_guidance': style_guidance
+            'style_guidance': style_guidance,
+            'job': job  # Pass job object for mode-specific processing
         })
 
         enhanced_map[ep_num] = result['enhanced_text']
@@ -3159,6 +3233,13 @@ def create_interactive_job():
     except ValueError:
         target_length = PodcastLength.MEDIUM
 
+    # Parse target mode
+    mode_str = request.form.get('target_mode', 'educational').lower()
+    try:
+        target_mode = PodcastMode(mode_str)
+    except ValueError:
+        target_mode = PodcastMode.EDUCATIONAL
+
     # Create job
     job = Job(
         id=generate_job_id(),
@@ -3170,7 +3251,8 @@ def create_interactive_job():
         multi_voice=request.form.get('multi_voice', 'true').lower() == 'true',
         ai_enhance=request.form.get('ai_enhance', 'true').lower() == 'true',
         auto_expand=request.form.get('auto_expand', 'true').lower() == 'true',
-        target_length=target_length
+        target_length=target_length,
+        target_mode=target_mode
     )
 
     length_config = job.get_length_config()

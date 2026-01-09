@@ -34,9 +34,11 @@ class PodcastLength(Enum):
     COMPREHENSIVE = "comprehensive"  # No time limit - processes ALL content with full detail
 
     @classmethod
-    def get_config(cls, length: 'PodcastLength') -> dict:
-        """Get configuration parameters for each length option"""
-        # IMPORTANT: All configs emphasize covering ALL topics - length only affects detail level
+    def get_config(cls, length: 'PodcastLength', mode: 'PodcastMode' = None) -> dict:
+        """Get configuration parameters for each length option with mode-specific customization"""
+        # Import here to avoid circular import
+        if mode is None:
+            mode = PodcastMode.EDUCATIONAL
         configs = {
             cls.QUICK: {
                 'display_name': 'Quick (~3-5 min)',
@@ -100,7 +102,64 @@ class PodcastLength(Enum):
                 'enhance_instruction': 'Create comprehensive two-host podcast dialogue between ALEX and SARAH covering ALL provided content. CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. There is NO word limit - length is determined by content depth. Every single topic from the source must receive thorough coverage with multiple examples, analogies, and detailed explanations. Maintain natural back-and-forth conversation between the hosts while ensuring 100% content coverage. This should be as long as needed to cover everything properly.'
             }
         }
-        return configs.get(length, configs[cls.MEDIUM])
+
+        # Get base configuration for the length
+        config = configs.get(length, configs[cls.MEDIUM]).copy()
+
+        # Apply mode-specific customizations
+        if mode == PodcastMode.COMEDY:
+            # Comedy mode: entertainment-focused, can skip unfunny topics
+            word_target = config.get('word_target', 2000)
+            config['enhance_instruction'] = f'Create comedy talk show dialogue between ALEX and SARAH (~{word_target} words). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels throughout. PRIORITIZE ENTERTAINMENT - conversational humor, funny observations, witty banter, and comedic timing. You may SKIP topics that don\'t lend themselves to humor - focus on naturally funny topics for better entertainment value. Include comedic reactions, observational humor, and "wait, that\'s actually hilarious" moments.'
+        else:
+            # Educational mode: comprehensive coverage, all topics required
+            # Keep existing educational enhance_instruction as-is
+            pass
+
+        return config
+
+
+class PodcastMode(Enum):
+    """Podcast style/tone options"""
+    EDUCATIONAL = "educational"
+    COMEDY = "comedy"
+
+    @classmethod
+    def get_config(cls, mode: 'PodcastMode') -> dict:
+        """Get configuration parameters for each mode option"""
+        configs = {
+            cls.EDUCATIONAL: {
+                'display_name': 'Educational',
+                'description': 'Informative, comprehensive coverage of all topics',
+                'topic_coverage_required': True,
+                'research_angles': [
+                    'current_statistics_data',
+                    'expert_opinions_analysis',
+                    'case_studies_examples',
+                    'historical_context_trends',
+                    'recent_news_2024_2025',
+                    'common_misconceptions',
+                    'future_predictions_trends',
+                    'debate_controversy_viewpoints'
+                ]
+            },
+            cls.COMEDY: {
+                'display_name': 'Comedy Talk Show',
+                'description': 'Conversational comedy between ALEX and SARAH',
+                'topic_coverage_required': False,  # Key difference - can skip unfunny topics
+                'research_angles': [
+                    'funny_examples_anecdotes',
+                    'absurd_facts_statistics',
+                    'social_media_reactions',
+                    'celebrity_mishaps_stories',
+                    'memes_cultural_references',
+                    'ironic_contradictions',
+                    'unexpected_consequences',
+                    'comedic_timing_opportunities'
+                ]
+            }
+        }
+        return configs.get(mode, configs[cls.EDUCATIONAL])
 
 
 class Stage(Enum):
@@ -165,10 +224,15 @@ class Job:
     ai_enhance: bool
     auto_expand: bool
     target_length: PodcastLength = PodcastLength.MEDIUM
+    target_mode: PodcastMode = PodcastMode.EDUCATIONAL
 
     def get_length_config(self) -> dict:
         """Get configuration for current target length"""
         return PodcastLength.get_config(self.target_length)
+
+    def get_mode_config(self) -> dict:
+        """Get configuration for current podcast mode"""
+        return PodcastMode.get_config(self.target_mode)
 
     # Results and suggestions
     stage_results: Dict[Stage, StageResult] = field(default_factory=dict)

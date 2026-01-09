@@ -104,6 +104,35 @@
                     </small>
                 </div>
 
+                <div class="form-section mode-section">
+                    <label for="target_mode">Podcast Style:</label>
+                    <div class="mode-options">
+                        <label class="mode-option" data-mode="educational">
+                            <input type="radio" name="target_mode" value="educational" checked>
+                            <div class="mode-card">
+                                <span class="mode-icon">🎓</span>
+                                <span class="mode-name">Educational</span>
+                                <span class="mode-desc">Comprehensive, informative</span>
+                            </div>
+                        </label>
+                        <label class="mode-option" data-mode="comedy">
+                            <input type="radio" name="target_mode" value="comedy">
+                            <div class="mode-card">
+                                <span class="mode-icon">😂</span>
+                                <span class="mode-name">Comedy</span>
+                                <span class="mode-desc">Conversational humor</span>
+                            </div>
+                        </label>
+                    </div>
+                    <div class="mode-warning comedy-warning hidden">
+                        ⚠️ <strong>Comedy Mode:</strong> Prioritizes entertainment. Some topics may be skipped if unfunny.
+                    </div>
+                    <small class="mode-hint">
+                        <strong>Educational:</strong> Covers ALL topics with facts and analysis<br>
+                        <strong>Comedy:</strong> Focuses on entertaining topics, may skip unfunny ones
+                    </small>
+                </div>
+
                 <div class="form-section length-section">
                     <label for="target_length">Podcast Length:</label>
                     <div class="length-options">
@@ -285,14 +314,21 @@
                         <div id="preview-changes-list"></div>
                     </div>
 
-                    <!-- Quick Suggestion Buttons -->
+                    <!-- Quick Suggestion Buttons (Mode-Specific) -->
                     <div class="quick-suggestions">
                         <span class="quick-label">Quick suggestions:</span>
-                        <button type="button" class="quick-btn" data-suggestion="Focus on statistics and data">More statistics</button>
-                        <button type="button" class="quick-btn" data-suggestion="Make it funnier and more engaging">Make it funnier</button>
-                        <button type="button" class="quick-btn" data-suggestion="Add more real-world examples">More examples</button>
-                        <button type="button" class="quick-btn" data-suggestion="Simplify the language">Simplify</button>
-                        <button type="button" class="quick-btn" data-suggestion="Make it more conversational">More casual</button>
+
+                        <!-- Educational Mode Suggestions (shown by default) -->
+                        <button type="button" class="quick-btn educational-only" data-suggestion="Focus on statistics and data">More statistics</button>
+                        <button type="button" class="quick-btn educational-only" data-suggestion="Add more real-world examples">More examples</button>
+                        <button type="button" class="quick-btn educational-only" data-suggestion="Simplify the language">Simplify</button>
+                        <button type="button" class="quick-btn educational-only" data-suggestion="Make it more conversational">More casual</button>
+
+                        <!-- Comedy Mode Suggestions (hidden by default) -->
+                        <button type="button" class="quick-btn comedy-only hidden" data-suggestion="Add more observational humor">More humor</button>
+                        <button type="button" class="quick-btn comedy-only hidden" data-suggestion="Include funny anecdotes and stories">More anecdotes</button>
+                        <button type="button" class="quick-btn comedy-only hidden" data-suggestion="Add comedic timing and reactions">Better timing</button>
+                        <button type="button" class="quick-btn comedy-only hidden" data-suggestion="Focus on absurd facts and irony">Absurd facts</button>
                     </div>
 
                     <!-- Custom Input -->
@@ -1040,6 +1076,43 @@
 
         // Initialize interactive pipeline
         const interactivePipeline = new InteractivePipeline();
+
+        // Mode switching functionality for Educational vs Comedy
+        function initializeModeSelector() {
+            const modeRadios = document.querySelectorAll('input[name="target_mode"]');
+
+            modeRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    const isComedy = this.value === 'comedy';
+
+                    // Toggle suggestion buttons visibility
+                    document.querySelectorAll('.educational-only').forEach(btn => {
+                        btn.classList.toggle('hidden', isComedy);
+                    });
+                    document.querySelectorAll('.comedy-only').forEach(btn => {
+                        btn.classList.toggle('hidden', !isComedy);
+                    });
+
+                    // Show/hide comedy warning
+                    const comedyWarning = document.querySelector('.comedy-warning');
+                    if (comedyWarning) {
+                        comedyWarning.classList.toggle('hidden', !isComedy);
+                    }
+
+                    // Clear any selected quick suggestions when switching modes
+                    document.querySelectorAll('.quick-btn').forEach(btn => {
+                        btn.classList.remove('selected');
+                    });
+                });
+            });
+        }
+
+        // Initialize mode selector when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeModeSelector);
+        } else {
+            initializeModeSelector();
+        }
 
         // Check if AI enhance is enabled to use interactive pipeline
         function shouldUseInteractivePipeline() {
