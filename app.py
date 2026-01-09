@@ -267,7 +267,9 @@ OUTPUT: Return ONLY the expanded dialogue script with ALEX and SARAH speakers, n
 SCRIPT_EXPANSION_MODEL = os.environ.get('SCRIPT_EXPANSION_MODEL', 'gpt-4o')
 
 # Claude enhancement prompt for natural, engaging two-person dialogue
-CLAUDE_ENHANCEMENT_PROMPT = """You are an expert podcast script editor. Your job is to polish dialogue for maximum listener engagement while preserving all content and meaning.
+CLAUDE_ENHANCEMENT_PROMPT = """You are an expert podcast script editor. Your job is to enhance and potentially EXPAND dialogue for maximum listener engagement while preserving all original topics and meaning.
+
+IMPORTANT: If you receive EXPANSION INSTRUCTIONS above, you MUST significantly expand the content to meet the word target. Add examples, explanations, analogies, and educational depth. Do NOT simply polish - EXPAND.
 
 TWO-PERSON DIALOGUE BALANCE:
 - Ensure natural back-and-forth between ALEX and SARAH
@@ -300,12 +302,13 @@ ENHANCEMENT RULES:
 8. LISTENER HOOKS: Tease upcoming content, create curiosity gaps
 
 PRESERVE:
-- All factual information and technical details
+- All factual information and technical details (expand on them with examples)
 - Speaker names (ALEX: and SARAH: only)
 - The overall structure and episode flow
 - Any specific numbers, dates, or statistics (but write them as words)
+- Cover EVERY topic from the original - never skip content
 
-OUTPUT: Return the enhanced script only. No explanations or meta-commentary."""
+OUTPUT: Return the enhanced (and expanded if instructed) script only. No explanations or meta-commentary."""
 
 # Perplexity research prompt for factual accuracy
 PERPLEXITY_RESEARCH_PROMPT = """You are a research assistant helping create accurate podcast content.
@@ -1312,6 +1315,7 @@ def enhance_episode_with_claude(episode_data):
     episode_text = episode_data.get('text', '')
     speakers = episode_data.get('speakers', [])
     research_context = episode_data.get('research', '')  # Get research separately
+    style_guidance = episode_data.get('style_guidance', '')  # Length/expansion instructions
 
     # Check if Claude is configured
     client = get_claude_client()
@@ -1331,8 +1335,15 @@ def enhance_episode_with_claude(episode_data):
 
         speaker_list = ', '.join(speakers) if speakers else 'ALEX, SARAH'
 
-        # Build prompt with research context (but don't embed markers in output)
-        prompt_parts = [CLAUDE_ENHANCEMENT_PROMPT, f"\n\nSPEAKERS: {speaker_list}"]
+        # Build prompt with style guidance FIRST (so Claude prioritizes length requirements)
+        prompt_parts = []
+
+        # Add expansion/length instructions PROMINENTLY at the start
+        if style_guidance:
+            prompt_parts.append(f"CRITICAL INSTRUCTION - READ FIRST:\n{style_guidance}\n\n")
+
+        prompt_parts.append(CLAUDE_ENHANCEMENT_PROMPT)
+        prompt_parts.append(f"\n\nSPEAKERS: {speaker_list}")
 
         if research_context:
             prompt_parts.append(f"\n\nRESEARCH NOTES (use to verify/enhance facts, do NOT include these markers in output):\n{research_context}")
@@ -2332,7 +2343,7 @@ def run_stage_expand(job: Job) -> StageResult:
 
 
 def run_stage_enhance(job: Job) -> StageResult:
-    """Enhancement stage - Claude polishes dialogue"""
+    """Enhancement stage - Claude polishes AND EXPANDS dialogue to meet length targets"""
     text = job.final_text if job.final_text else job.text
     episodes = parse_episodes(text)
     research_map = job.research_map
@@ -2341,6 +2352,13 @@ def run_stage_enhance(job: Job) -> StageResult:
     enhance_instruction = length_config['enhance_instruction']
     detail_level = length_config['detail_level']
     word_target = length_config['word_target']
+
+    # Calculate current word count to determine expansion needed
+    current_word_count = len(text.split())
+    words_needed = max(0, word_target - current_word_count)
+    expansion_ratio = word_target / max(current_word_count, 1)
+
+    logger.info(f"Enhance stage: current={current_word_count} words, target={word_target}, ratio={expansion_ratio:.2f}x")
 
     if not CLAUDE_API_KEY:
         return StageResult(
@@ -2352,15 +2370,40 @@ def run_stage_enhance(job: Job) -> StageResult:
 
     all_changes = []
     enhanced_map = {}
-    preview_lines = [f"Claude enhancement complete ({detail_level} detail, ~{word_target} words target):\n"]
+    preview_lines = [f"Claude enhancement ({detail_level} detail, ~{word_target} words target):\n"]
+    preview_lines.append(f"Input: {current_word_count} words → Target: {word_target} words ({expansion_ratio:.1f}x expansion)\n")
+
+    # Calculate per-episode word targets
+    num_episodes = len(episodes)
+    words_per_episode = word_target // max(num_episodes, 1)
 
     # Enhance each episode
     for ep in episodes:
         ep_num = ep['episode_num']
         research = research_map.get(ep_num, '')
+        ep_word_count = len(ep['text'].split())
 
-        # Combine length guidance with user suggestion
-        style_guidance = f"LENGTH/DETAIL GUIDANCE: {enhance_instruction}"
+        # Build STRONG expansion instructions based on gap between current and target
+        if expansion_ratio > 1.5:
+            # Need significant expansion
+            style_guidance = f"""MANDATORY EXPANSION REQUIREMENT:
+The current content is {current_word_count} words but MUST be expanded to approximately {word_target} words.
+This episode should be approximately {words_per_episode} words (currently {ep_word_count} words).
+You MUST {expansion_ratio:.1f}x expand the content by:
+1. Adding multiple detailed examples for EVERY point mentioned
+2. Including relevant analogies and real-world scenarios
+3. Having ALEX ask follow-up questions that SARAH answers in depth
+4. Adding educational context and background information
+5. Expanding on implications and applications of each topic
+6. Including "for example" and "think of it like" explanations throughout
+
+DO NOT just polish - you MUST significantly EXPAND the dialogue while covering all original topics.
+
+{enhance_instruction}"""
+        else:
+            # Minor expansion or just polish
+            style_guidance = f"LENGTH/DETAIL GUIDANCE: {enhance_instruction}\nTarget approximately {words_per_episode} words for this episode."
+
         if suggestion:
             style_guidance += f"\n\nADDITIONAL USER GUIDANCE: {suggestion}"
 
