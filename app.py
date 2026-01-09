@@ -2314,12 +2314,15 @@ def analyze_content_complexity(text: str, detected_topics: List[str]) -> dict:
     total_words = len(text.split())
     words_per_topic = total_words / max(len(detected_topics), 1)
 
+    # Optimize: Convert text to lowercase once instead of for each topic
+    text_lower = text.lower()
+
     for topic in detected_topics:
         # Base time: 3 minutes minimum per topic
         base_minutes = 3.0
 
-        # Add time based on content richness for this topic
-        topic_mentions = text.lower().count(topic.lower())
+        # Add time based on content richness for this topic (optimized)
+        topic_mentions = text_lower.count(topic.lower())
         detail_multiplier = min(3.0, 1.0 + (topic_mentions * 0.3))
 
         # Add time based on words available for this topic
@@ -2619,7 +2622,7 @@ def run_stage_enhance(job: Job) -> StageResult:
         # COMPREHENSIVE mode - content determines length
         is_comprehensive_mode = True
         words_needed = 0  # No artificial limit
-        expansion_ratio = float('inf')  # Always expand for comprehensive coverage
+        expansion_ratio = 999  # Large number indicating comprehensive expansion (avoids float('inf') formatting issues)
         logger.info(f"Enhance stage: COMPREHENSIVE mode, current={current_word_count} words, no target limit")
 
         preview_lines = [f"Claude enhancement (COMPREHENSIVE mode - no word limit):\n"]
