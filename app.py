@@ -2511,7 +2511,6 @@ def run_stage_analyze(job: Job) -> StageResult:
 
     if word_target is not None and coverage_ratio < 0.7:  # Selected length covers less than 70% of estimated needs
         # Find recommended length
-        from job_store import PodcastLength
         for length in [PodcastLength.EXTENDED, PodcastLength.LONG, PodcastLength.MEDIUM, PodcastLength.SHORT]:
             cfg = PodcastLength.get_config(length)
             if cfg['word_target'] >= estimated_words_needed * 0.8:
