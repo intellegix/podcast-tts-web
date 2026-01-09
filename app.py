@@ -2394,7 +2394,7 @@ def run_stage_generate(job: Job) -> StageResult:
         speakers = detect_speakers(processed)
         if not speakers:
             speakers = ['ALEX', 'SARAH']
-        voice_assignments = assign_voices_to_speakers(speakers)
+        voice_assignments = assign_speaker_voices(speakers)
         chunks = split_by_speaker(processed, voice_assignments, job.voice)
     else:
         chunks = split_into_chunks(processed)
