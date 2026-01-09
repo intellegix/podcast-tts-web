@@ -2597,10 +2597,9 @@ def get_interactive_job_status(job_id):
     if job.status == JobStatus.PAUSED_FOR_REVIEW and job.current_stage:
         preview = job.get_stage_preview()
         if preview:
-            response['stage_preview'] = preview['preview']
-            response['citations'] = preview.get('citations', [])
-            response['changes'] = preview.get('changes', [])
-            response['metadata'] = preview.get('metadata', {})
+            # Return full preview object for frontend
+            response['stage_preview'] = preview
+            response['stage_name'] = preview.get('stage_name', '')
 
     # Include download info if complete
     if job.status == JobStatus.COMPLETE:
