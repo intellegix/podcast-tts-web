@@ -3164,9 +3164,8 @@ def run_stage_generate(job: Job) -> StageResult:
         logger.error(f"EMERGENCY: Job {job_id} generating {total_chunks} chunks, aborting to prevent credit burn")
         return StageResult(
             stage=Stage.GENERATE,
-            output_preview="ERROR: Generation aborted - too many chunks",
-            full_output=None,
-            error_message=f"Generation halted: Exceeded 50 chunk safety limit to prevent excessive OpenAI costs. Job tried to generate {total_chunks} chunks (normal is ~20)."
+            output_preview=f"❌ GENERATION HALTED - SAFETY LIMIT\n\nJob tried to generate {total_chunks} chunks (normal is ~20).\nExceeded 50 chunk safety limit to prevent excessive OpenAI costs.\n\nEstimated cost would have been: ${total_chunks * 0.30:.2f}\nCost with safety limit: $15.00 maximum\n\nThe comedy framework has been updated to prevent this issue.",
+            full_output=None
         )
 
     preview_lines = [f"Audio generation complete:\n"]
