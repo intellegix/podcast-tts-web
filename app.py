@@ -413,17 +413,18 @@ NATURAL PAUSES FOR COMEDIC EFFECT:
 CONTENT PRIORITIZATION:
 ========================================
 
-ENTERTAINMENT OVER COMPREHENSIVENESS:
-- Focus ONLY on topics with natural comedic potential
-- Skip topics that don't lend themselves to humor
+ENTERTAINMENT THROUGH COMEDY TRANSFORMATION:
+- Transform ALL topics into comedic content
+- Find comedy angles in all topics (nothing is inherently unfunny)
 - Extract absurd angles from serious subjects
 - Prioritize relatable human frustrations
 
-SELECTIVE COVERAGE MANDATE:
-- You may omit entire topics if unfunny
-- Better to have 5 hilarious topics than 10 forced ones
+MANDATORY COVERAGE WITH COMEDY FOCUS:
+- Cover ALL provided topics (no omissions allowed)
+- Find humor angles within each required topic
 - Focus energy on making naturally funny content shine
 - Look for observational gold in everyday experiences
+- Transform potentially unfunny topics using comedy techniques
 
 ========================================
 TTS OPTIMIZATION:
@@ -3157,6 +3158,17 @@ def run_stage_generate(job: Job) -> StageResult:
         chunks = [(chunk, job.voice, None) for chunk in chunks]
 
     total_chunks = len(chunks)
+
+    # EMERGENCY: Hard cap to prevent OpenAI credit burn
+    if total_chunks > 50:
+        logger.error(f"EMERGENCY: Job {job_id} generating {total_chunks} chunks, aborting to prevent credit burn")
+        return StageResult(
+            stage=Stage.GENERATE,
+            output_preview="ERROR: Generation aborted - too many chunks",
+            full_output=None,
+            error_message=f"Generation halted: Exceeded 50 chunk safety limit to prevent excessive OpenAI costs. Job tried to generate {total_chunks} chunks (normal is ~20)."
+        )
+
     preview_lines = [f"Audio generation complete:\n"]
     preview_lines.append(f"  - {total_chunks} audio chunks generated")
 
@@ -3164,6 +3176,11 @@ def run_stage_generate(job: Job) -> StageResult:
     chunk_files = []
     client = get_client()
     for idx, (chunk_text, chunk_voice, speaker) in enumerate(chunks):
+        # Progress monitoring and cost tracking
+        if idx % 10 == 0 and idx > 0:  # Every 10 chunks (skip idx=0)
+            estimated_cost = idx * 0.30  # ~$0.30 per chunk
+            logger.info(f"TTS Progress: Generated {idx}/{total_chunks} chunks - Estimated OpenAI cost so far: ${estimated_cost:.2f}")
+
         output_path = job_dir / f"chunk_{idx:04d}.mp3"
         try:
             response = call_openai_tts_with_retry(client, job.model, chunk_voice, chunk_text)
