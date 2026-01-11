@@ -2682,9 +2682,9 @@ def run_stage_analyze(job: Job) -> StageResult:
 
     # Handle COMPREHENSIVE mode (no word target) vs standard modes
     if word_target is None:
-        # COMPREHENSIVE mode - no coverage ratio needed, always adequate
+        # Unlimited modes (COMPREHENSIVE or Extended) - no coverage ratio needed, always adequate
         coverage_ratio = float('inf')  # Infinite coverage capacity
-        logger.info(f"COMPREHENSIVE mode selected - will cover all content regardless of estimated needs ({estimated_words_needed} words)")
+        logger.info(f"Unlimited mode ({length_name}) selected - will cover all content regardless of estimated needs ({estimated_words_needed} words)")
     else:
         # Standard modes - check if target is adequate for content
         coverage_ratio = word_target / max(estimated_words_needed, 1)
