@@ -2667,7 +2667,12 @@ def run_stage_analyze(job: Job) -> StageResult:
     estimated_words_needed = estimate_coverage_words(topics, input_word_count)
 
     # Auto-recommend COMPREHENSIVE for large topic counts (25+ topics)
-    auto_recommend_comprehensive = len(topics) >= 25 and job.target_length != PodcastLength.COMPREHENSIVE
+    # Exclude Extended mode since it's now unlimited like Comprehensive
+    auto_recommend_comprehensive = (
+        len(topics) >= 25 and
+        job.target_length != PodcastLength.COMPREHENSIVE and
+        job.target_length != PodcastLength.EXTENDED
+    )
     if auto_recommend_comprehensive:
         logger.info(f"Auto-recommending COMPREHENSIVE mode for {len(topics)} topics")
 
@@ -2692,17 +2697,19 @@ def run_stage_analyze(job: Job) -> StageResult:
             # Find recommended length from fixed modes
             for length in [PodcastLength.EXTENDED, PodcastLength.LONG, PodcastLength.MEDIUM, PodcastLength.SHORT]:
                 cfg = PodcastLength.get_config(length)
-                if cfg['word_target'] >= estimated_words_needed * 0.8:
+                # Skip modes with unlimited word targets (None)
+                if cfg['word_target'] is not None and cfg['word_target'] >= estimated_words_needed * 0.8:
                     recommended_length = cfg['display_name']
                     break
 
             if not recommended_length:
                 recommended_length = "COMPREHENSIVE (Process ALL Content)"
 
+        target_description = "unlimited words" if word_target is None else f"{word_target:,} words"
         length_warning = f"""
 ⚠️  LENGTH WARNING: Your input contains {len(topics)} distinct topics ({input_word_count} words).
     To cover ALL topics adequately, you need approximately {estimated_words_needed:,} words.
-    Your selected length "{length_name}" targets only {word_target:,} words.
+    Your selected length "{length_name}" targets {target_description}.
 
     RECOMMENDATION: Select "{recommended_length}" to ensure complete coverage.
 
@@ -2872,14 +2879,18 @@ def run_stage_expand(job: Job) -> StageResult:
         )
 
     expanded_map = {}
-    preview_lines = [f"Expanding {len(incomplete)} incomplete episode(s) (target: ~{word_target} words):\n"]
+    word_target_display = "unlimited words" if word_target is None else f"{word_target} words"
+    preview_lines = [f"Expanding {len(incomplete)} incomplete episode(s) (target: ~{word_target_display}):\n"]
 
     for ep in incomplete:
         ep_num = ep['episode_num']
         research_context = research_map.get(ep_num, '')
 
         # Add user suggestion and length guidance to expansion context
-        style_guidance = f"\n\nLENGTH GUIDANCE: {expand_instruction} Target approximately {word_target} words total."
+        if word_target is None:
+            style_guidance = f"\n\nLENGTH GUIDANCE: {expand_instruction}"
+        else:
+            style_guidance = f"\n\nLENGTH GUIDANCE: {expand_instruction} Target approximately {word_target} words total."
         if suggestion:
             style_guidance += f"\n\nUSER GUIDANCE: {suggestion}"
 

@@ -81,14 +81,15 @@ class PodcastLength(Enum):
                 'enhance_instruction': 'Create rich, detailed two-host podcast dialogue between ALEX and SARAH that is approximately 3500 words long (23 minutes of audio). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels. Deeply explore ALL topics with multiple examples and anecdotes per point. Include fun tangents, deeper explanations, and natural back-and-forth conversation. DO NOT shorten.'
             },
             cls.EXTENDED: {
-                'display_name': 'Extended (~90 min)',
-                'description': 'Comprehensive deep-dive with maximum coverage',
+                'display_name': 'Extended (Unlimited)',
+                'description': 'Unlimited duration - covers ALL content in exhaustive detail',
                 'research_agents': 8,
                 'research_depth': 'exhaustive',
                 'detail_level': 'comprehensive',
-                'word_target': 40000,
-                'expand_instruction': 'CRITICAL: You MUST generate approximately 40,000 words of dialogue (about 90 minutes of audio). Create exhaustive coverage with extensive examples, case studies, historical context, expert perspectives, detailed tangents, and comprehensive exploration for every point. This should be a thorough deep-dive covering ALL aspects. DO NOT stop short - generate the full word count.',
-                'enhance_instruction': 'Create immersive, two-host podcast dialogue between ALEX and SARAH that is approximately 40,000 words long (90 minutes of audio). CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels. Include extensive exploration, multiple anecdotes per topic, deep explanations, natural back-and-forth conversation, detailed case studies, and thorough coverage of every aspect. DO NOT shorten or condense - aim for comprehensive coverage. GENERATE THE FULL 40,000 WORDS.'
+                'word_target': None,  # No word limit - content determines length
+                'minimum_coverage': 1.0,  # 100% topic coverage required
+                'expand_instruction': 'CRITICAL: You MUST cover every single topic and point from the source material. There is NO word limit or time constraint. Generate exhaustive dialogue with extensive examples, case studies, historical context, expert perspectives, detailed tangents, and comprehensive exploration for every point. Length should be determined by content richness and thoroughness, not arbitrary targets.',
+                'enhance_instruction': 'Create immersive, natural two-host podcast dialogue between ALEX and SARAH with NO word limit - length is determined by content depth and thoroughness. CRITICAL: MUST use proper dialogue format with ALEX: and SARAH: speaker labels. Cover ALL topics extensively with multiple examples, anecdotes, deep explanations, natural back-and-forth conversation, detailed case studies, and exhaustive coverage of every aspect. Generate as much content as needed for complete coverage.'
             },
             cls.COMPREHENSIVE: {
                 'display_name': 'Comprehensive (Process ALL Content)',
