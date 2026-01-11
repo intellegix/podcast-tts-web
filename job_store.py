@@ -280,6 +280,11 @@ class Job:
     news_metadata: Dict[str, Any] = field(default_factory=dict)  # Maps topic title -> NewsTopicMetadata
     news_urls: List[str] = field(default_factory=list)  # Extracted URLs for research
 
+    # User-provided source integration
+    user_sources: List[Dict[str, str]] = field(default_factory=list)  # User-provided citations from input
+    research_scaling_applied: bool = False  # Whether dynamic scaling was used
+    total_research_agents: int = 0  # Actual agents used (may exceed base config)
+
     def to_dict(self) -> dict:
         """Convert job to JSON-serializable dict"""
         return {

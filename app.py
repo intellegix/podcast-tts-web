@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from functools import wraps
 from collections import deque
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict
 from dataclasses import dataclass
 from flask import Flask, render_template, request, jsonify, send_file, Response, session, redirect, url_for
 from flask_limiter import Limiter
@@ -2284,6 +2284,18 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
 
     logger.info(f"Episode {episode_num}: Using {len(research_angles)} research agents ({research_depth} depth)")
 
+    # Configure research query depth based on research_depth parameter
+    depth_configs = {
+        'surface': {'max_tokens': 400, 'temperature': 0.4},
+        'moderate': {'max_tokens': 600, 'temperature': 0.3},
+        'thorough': {'max_tokens': 800, 'temperature': 0.3},
+        'deep': {'max_tokens': 1000, 'temperature': 0.2},
+        'exhaustive': {'max_tokens': 1500, 'temperature': 0.2}
+    }
+
+    # Get depth config, fallback to moderate if unknown depth
+    depth_config = depth_configs.get(research_depth, depth_configs['moderate'])
+
     def query_single_angle(angle: str) -> dict:
         """Query Perplexity for a single research angle"""
         try:
@@ -2300,8 +2312,8 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
                         {"role": "system", "content": "You are a research assistant for podcast content. Provide concise, factual information with specific data points, statistics, and expert insights. Be informative but brief."},
                         {"role": "user", "content": angle}
                     ],
-                    "temperature": 0.3,
-                    "max_tokens": 600,
+                    "temperature": depth_config['temperature'],
+                    "max_tokens": depth_config['max_tokens'],
                     "return_citations": True
                 },
                 timeout=60
@@ -2344,6 +2356,107 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
         'success': successful > 0,
         'agent_count': len(research_angles)
     }
+
+
+def extract_user_sources(text: str) -> List[Dict[str, str]]:
+    """
+    Extract user-provided citations and sources from input text.
+    Returns list of dicts with 'type', 'id', 'url', and 'description' fields.
+    """
+    sources = []
+
+    # Pattern 1: Numbered citations [1], [2], etc. with footnotes
+    citation_pattern = r'\[(\d+)\]'
+    footnote_pattern = r'^\[(\d+)\]\s*(.+?)$'
+
+    # Find all numbered citations in text
+    citations = re.findall(citation_pattern, text)
+
+    # Look for corresponding footnotes
+    for line in text.split('\n'):
+        line = line.strip()
+        footnote_match = re.match(footnote_pattern, line)
+        if footnote_match:
+            citation_id = footnote_match.group(1)
+            description = footnote_match.group(2).strip()
+
+            # Extract URL from description if present
+            url_match = re.search(r'(https?://\S+)', description)
+            url = url_match.group(1) if url_match else ""
+
+            sources.append({
+                'type': 'numbered_citation',
+                'id': citation_id,
+                'url': url,
+                'description': description
+            })
+
+    # Pattern 2: Inline citations (Source: URL)
+    inline_pattern = r'\((?:Source|Ref|Citation):\s*(https?://\S+)\)'
+    inline_matches = re.findall(inline_pattern, text, re.IGNORECASE)
+
+    for i, url in enumerate(inline_matches, 1):
+        sources.append({
+            'type': 'inline_citation',
+            'id': f'inline_{i}',
+            'url': url,
+            'description': f'Inline source: {url}'
+        })
+
+    # Pattern 3: References section
+    references_sections = re.findall(
+        r'(?:References?|Sources?|Citations?):\s*\n((?:[-*•]|\d+\.)\s*.+?)(?=\n\n|$)',
+        text,
+        re.IGNORECASE | re.MULTILINE | re.DOTALL
+    )
+
+    for section in references_sections:
+        # Split references into individual items
+        ref_lines = [line.strip() for line in section.split('\n') if line.strip()]
+        for i, ref_line in enumerate(ref_lines, 1):
+            # Extract URL if present
+            url_match = re.search(r'(https?://\S+)', ref_line)
+            url = url_match.group(1) if url_match else ""
+
+            sources.append({
+                'type': 'reference_section',
+                'id': f'ref_{i}',
+                'url': url,
+                'description': ref_line
+            })
+
+    # Pattern 4: URLs at end of lines (common citation pattern)
+    url_pattern = r'^(.+?)\s+(https?://\S+)\s*$'
+    for line in text.split('\n'):
+        line = line.strip()
+        url_match = re.match(url_pattern, line)
+        if url_match and len(line) > 20:  # Avoid matching short lines
+            description = url_match.group(1).strip()
+            url = url_match.group(2)
+
+            sources.append({
+                'type': 'url_citation',
+                'id': f'url_{len(sources) + 1}',
+                'url': url,
+                'description': description
+            })
+
+    # Remove duplicates based on URL
+    seen_urls = set()
+    unique_sources = []
+    for source in sources:
+        if source['url']:
+            if source['url'] not in seen_urls:
+                seen_urls.add(source['url'])
+                unique_sources.append(source)
+        else:
+            # Keep non-URL sources (might be book references, etc.)
+            unique_sources.append(source)
+
+    if unique_sources:
+        logger.info(f"Extracted {len(unique_sources)} user-provided sources from input text")
+
+    return unique_sources
 
 
 def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
@@ -2655,6 +2768,12 @@ def run_stage_analyze(job: Job) -> StageResult:
     topics, news_metadata = detect_topics(text)
     job.detected_topics = topics  # Persist topics for mandatory coverage in enhance stage
 
+    # Extract user-provided sources from input text
+    user_sources = extract_user_sources(text)
+    job.user_sources = user_sources
+    if user_sources:
+        logger.info(f"Found {len(user_sources)} user-provided sources in input text")
+
     # Handle news format metadata
     if news_metadata:
         job.is_news_format = True
@@ -2798,8 +2917,32 @@ def run_stage_research(job: Job) -> StageResult:
     episodes = job.episodes
     suggestion = job.user_suggestions.get(Stage.RESEARCH, '')
     length_config = job.get_length_config()
-    num_agents = length_config['research_agents']
+    base_agents = length_config['research_agents']
     research_depth = length_config['research_depth']
+
+    # Dynamic research scaling for unlimited modes
+    topic_count = len(job.detected_topics)
+    user_source_count = len(job.user_sources)
+
+    if job.target_length in [PodcastLength.EXTENDED, PodcastLength.COMPREHENSIVE]:
+        # Scale agents based on content complexity
+        topic_bonus = min(topic_count // 5, 8)  # +1 agent per 5 topics, max +8
+        user_source_bonus = min(user_source_count // 3, 5)  # +1 agent per 3 user sources, max +5
+        num_agents = base_agents + topic_bonus + user_source_bonus
+
+        job.research_scaling_applied = True
+        job.total_research_agents = num_agents
+
+        logger.info(
+            f"Dynamic research scaling: {base_agents} base + {topic_bonus} topic bonus + {user_source_bonus} source bonus = {num_agents} agents total"
+        )
+        logger.info(
+            f"Scaling factors: {topic_count} topics, {user_source_count} user sources"
+        )
+    else:
+        # Fixed scaling for standard modes
+        num_agents = base_agents
+        job.total_research_agents = num_agents
 
     if not episodes:
         return StageResult(
@@ -2841,17 +2984,38 @@ def run_stage_research(job: Job) -> StageResult:
     # Deduplicate citations
     unique_citations = list(dict.fromkeys(all_citations))
 
-    preview_lines.insert(1, f"Total: {len(unique_citations)} unique sources across {total_agents} research queries\n")
+    # Calculate source breakdown for enhanced preview
+    user_source_count = len(job.user_sources) if hasattr(job, 'user_sources') else 0
+    researched_source_count = len(unique_citations)
+    total_source_count = user_source_count + researched_source_count
+
+    # Enhanced source count information
+    if user_source_count > 0:
+        source_summary = f"Total: {total_source_count} sources ({user_source_count} user-provided + {researched_source_count} researched)"
+    else:
+        source_summary = f"Total: {researched_source_count} researched sources"
+
+    preview_lines.insert(1, f"{source_summary} across {total_agents} research queries\n")
+
+    # Prepare citation preview with context about full collection
+    preview_citations = unique_citations[:20]
+    if len(unique_citations) > 20:
+        citation_note = f"Showing preview of {len(preview_citations)} citations (Total: {len(unique_citations)} available)"
+    else:
+        citation_note = f"All {len(unique_citations)} researched citations shown"
 
     return StageResult(
         stage=Stage.RESEARCH,
         output_preview='\n'.join(preview_lines),
         full_output={'research_map': research_map},
-        citations=unique_citations[:20],  # Top 20 for preview
+        citations=preview_citations,
         metadata={
             'total_agents': total_agents,
             'episodes_researched': len(research_map),
-            'total_citations': len(unique_citations)
+            'total_citations': len(unique_citations),
+            'user_source_count': user_source_count,
+            'total_source_count': total_source_count,
+            'citation_preview_note': citation_note
         }
     )
 
