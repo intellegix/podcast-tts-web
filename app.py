@@ -241,6 +241,28 @@ class EnterprisePerformanceMonitor:
 # Initialize global performance monitor
 performance_monitor = EnterprisePerformanceMonitor()
 
+# ================================================================================================
+# RENDER SAFE MODE CONFIGURATION
+# ================================================================================================
+
+# Safe mode limits for Render hosting constraints (512MB memory, limited CPU)
+RENDER_SAFE_MODE = os.environ.get('RENDER_SAFE_MODE', 'true').lower() == 'true'
+
+if RENDER_SAFE_MODE:
+    # Conservative limits for Render deployment
+    SAFE_EXPAND_AGENTS = 3      # Reduced from 10
+    SAFE_ENHANCE_AGENTS = 2     # Reduced from 8
+    SAFE_TTS_AGENTS = 8         # Reduced from 50
+    SAFE_RATE_LIMIT_DELAY = 0.2 # 200ms delay between agent spawning
+    logger.info("🛡️ RENDER SAFE MODE: Conservative agent limits enabled")
+else:
+    # Full enterprise limits for high-resource environments
+    SAFE_EXPAND_AGENTS = 10
+    SAFE_ENHANCE_AGENTS = 8
+    SAFE_TTS_AGENTS = 50
+    SAFE_RATE_LIMIT_DELAY = 0.05
+    logger.info("🚀 ENTERPRISE MODE: Full parallelization enabled")
+
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24).hex())
@@ -3762,8 +3784,8 @@ def run_stage_expand(job: Job) -> StageResult:
             metadata={'expanded_count': 0, 'agents_used': 0, 'speedup_achieved': 1.0}
         )
 
-    # ENTERPRISE AGENT ALLOCATION: Dynamic scaling based on workload
-    agent_count = min(len(incomplete), 10)  # 1 agent per episode, max 10 (OpenAI rate limits)
+    # ENTERPRISE AGENT ALLOCATION: Dynamic scaling with Render safety limits
+    agent_count = min(len(incomplete), SAFE_EXPAND_AGENTS)  # Safe mode: max 3 agents on Render
 
     word_target_display = "unlimited words" if word_target is None else f"{word_target} words"
     preview_lines = [f"🚀 ENTERPRISE EXPAND: {len(incomplete)} episodes → {agent_count} parallel agents (target: ~{word_target_display}):\n"]
@@ -3786,8 +3808,13 @@ def run_stage_expand(job: Job) -> StageResult:
 
         expansion_tasks.append((ep, research_context, style_guidance))
 
-    # PARALLEL EXECUTION: Process all episodes concurrently
+    # PARALLEL EXECUTION: Process all episodes concurrently with Render safety
     start_time = time.time()
+
+    # Add rate limiting delay to prevent resource exhaustion
+    if RENDER_SAFE_MODE:
+        time.sleep(SAFE_RATE_LIMIT_DELAY)
+        logger.info(f"🛡️ Safe mode: Added {SAFE_RATE_LIMIT_DELAY}s delay before expansion")
 
     expansion_pool = GeventPool(size=agent_count)
     parallel_results = list(expansion_pool.imap_unordered(_expand_single_episode, expansion_tasks))
@@ -3923,8 +3950,8 @@ def run_stage_enhance(job: Job) -> StageResult:
         all_topics, _ = detect_topics(text)  # Extract topics, ignore metadata in fallback
     topic_list = "\n".join(f"   - {t[:80]}" for t in all_topics)
 
-    # ENTERPRISE AGENT ALLOCATION: Dynamic scaling for Claude API
-    agent_count = min(len(episodes), 8)  # Claude API rate limit consideration
+    # ENTERPRISE AGENT ALLOCATION: Dynamic scaling with Render safety limits
+    agent_count = min(len(episodes), SAFE_ENHANCE_AGENTS)  # Safe mode: max 2 agents on Render
 
     logger.info(f"Enterprise ENHANCE: Processing {len(episodes)} episodes with {agent_count} parallel Claude agents")
 
@@ -4008,8 +4035,13 @@ Remember: ALL topics listed above MUST be covered."""
             'job': job
         })
 
-    # PARALLEL EXECUTION: Process all episodes concurrently with quality assurance
+    # PARALLEL EXECUTION: Process all episodes concurrently with quality assurance and Render safety
     start_time = time.time()
+
+    # Add rate limiting delay to prevent resource exhaustion
+    if RENDER_SAFE_MODE:
+        time.sleep(SAFE_RATE_LIMIT_DELAY)
+        logger.info(f"🛡️ Safe mode: Added {SAFE_RATE_LIMIT_DELAY}s delay before enhancement")
 
     enhancement_pool = GeventPool(size=agent_count)
     parallel_results = list(enhancement_pool.imap_unordered(enhance_episode_with_claude, enhancement_tasks))
@@ -4173,9 +4205,9 @@ def run_stage_generate(job: Job) -> StageResult:
             logger.error(f"Enterprise TTS chunk {idx} failed: {e}")
             return (idx, None, chunk_voice, chunk_speaker, str(e))
 
-    # DYNAMIC AGENT ALLOCATION: Intelligent scaling for TTS workload
-    # Scale based on chunk count with OpenAI rate limit considerations
-    max_concurrent = min(total_chunks, 50)  # Respect OpenAI rate limits
+    # DYNAMIC AGENT ALLOCATION: Intelligent scaling with Render safety limits
+    # Scale based on chunk count with Render hosting constraints
+    max_concurrent = min(total_chunks, SAFE_TTS_AGENTS)  # Safe mode: max 8 agents on Render
     agent_count = max_concurrent
 
     preview_lines = [f"🚀 ENTERPRISE GENERATE: {total_chunks} chunks → {agent_count} parallel TTS agents:\n"]
@@ -4185,10 +4217,15 @@ def run_stage_generate(job: Job) -> StageResult:
     # Prepare chunk arguments for parallel processing
     chunk_args = [(i, chunk_text, chunk_voice, speaker) for i, (chunk_text, chunk_voice, speaker) in enumerate(chunks)]
 
-    # PARALLEL EXECUTION: Process all chunks concurrently
+    # PARALLEL EXECUTION: Process all chunks concurrently with Render safety
     start_time = time.time()
-    client = get_client()
 
+    # Add rate limiting delay to prevent resource exhaustion
+    if RENDER_SAFE_MODE:
+        time.sleep(SAFE_RATE_LIMIT_DELAY)
+        logger.info(f"🛡️ Safe mode: Added {SAFE_RATE_LIMIT_DELAY}s delay before TTS generation")
+
+    client = get_client()
     tts_pool = GeventPool(size=agent_count)
     parallel_results = list(tts_pool.imap_unordered(_generate_single_chunk_enterprise, chunk_args))
 
@@ -4470,6 +4507,86 @@ def create_interactive_job():
     })
 
 
+def calculate_job_progress(job: Job) -> dict:
+    """
+    Calculate real-time progress for enterprise job processing.
+
+    Returns accurate progress percentage and stage details for UI progress bars.
+    """
+    stage_weights = {
+        Stage.ANALYZE: 10,   # 10% - Fast analysis
+        Stage.RESEARCH: 25,  # 25% - Research with multiple agents
+        Stage.EXPAND: 20,    # 20% - Enterprise parallel expansion
+        Stage.ENHANCE: 25,   # 25% - Enterprise parallel enhancement
+        Stage.GENERATE: 15,  # 15% - Enterprise parallel TTS
+        Stage.COMBINE: 5     # 5% - Quick audio assembly
+    }
+
+    completed_stages = list(job.stage_results.keys())
+    current_stage = job.current_stage
+
+    # Calculate base progress from completed stages
+    base_progress = sum(stage_weights[stage] for stage in completed_stages)
+
+    # Add partial progress for current stage if running
+    current_stage_progress = 0
+    if current_stage and job.status == JobStatus.RUNNING:
+        # Estimate 50% completion if currently processing
+        current_stage_progress = stage_weights[current_stage] * 0.5
+    elif current_stage and job.status == JobStatus.PAUSED_FOR_REVIEW:
+        # 100% completion if paused for review (stage done)
+        if current_stage not in completed_stages:
+            current_stage_progress = stage_weights[current_stage]
+
+    total_progress = min(base_progress + current_stage_progress, 100)
+
+    # Get enterprise metrics if available
+    enterprise_info = {}
+    if current_stage and current_stage in job.stage_results:
+        metadata = job.stage_results[current_stage].metadata
+        if metadata and metadata.get('enterprise_mode'):
+            enterprise_info = {
+                'agents_used': metadata.get('agents_used', 1),
+                'speedup_achieved': metadata.get('speedup_achieved', 1.0),
+                'success_rate': metadata.get('success_rate', 1.0),
+                'safe_mode_active': RENDER_SAFE_MODE
+            }
+
+    return {
+        'percentage': round(total_progress, 1),
+        'stage_name': Stage.get_display_name(current_stage) if current_stage else 'Initializing',
+        'completed_stages': len(completed_stages),
+        'total_stages': 6,
+        'status_text': f"{Stage.get_display_name(current_stage)} ({total_progress:.0f}%)" if current_stage else "Starting...",
+        'enterprise_metrics': enterprise_info,
+        'estimated_time_remaining': estimate_remaining_time(job, total_progress)
+    }
+
+
+def estimate_remaining_time(job: Job, current_progress: float) -> str:
+    """Estimate remaining processing time based on progress and enterprise speedups"""
+    if current_progress >= 100:
+        return "Complete"
+    elif current_progress <= 0:
+        return "Starting..."
+
+    # Base time estimates with enterprise speedups
+    if RENDER_SAFE_MODE:
+        # Conservative estimates for safe mode
+        base_time_minutes = 4  # 4 minutes total in safe mode
+    else:
+        # Full enterprise mode estimates
+        base_time_minutes = 2.5  # 2.5 minutes total in enterprise mode
+
+    remaining_progress = (100 - current_progress) / 100
+    remaining_minutes = base_time_minutes * remaining_progress
+
+    if remaining_minutes < 1:
+        return f"{int(remaining_minutes * 60)}s"
+    else:
+        return f"{remaining_minutes:.1f}m"
+
+
 @app.route('/api/job/<job_id>/status')
 @login_required
 @limiter.exempt  # Exempt from rate limiting - polling endpoint
@@ -4481,12 +4598,16 @@ def get_interactive_job_status(job_id):
     if not job:
         return jsonify({'error': 'Job not found'}), 404
 
+    # Calculate real-time progress percentage
+    stage_progress = calculate_job_progress(job)
+
     response = {
         'job_id': job.id,
         'status': job.status.value,
         'current_stage': job.current_stage.value if job.current_stage else None,
         'current_stage_name': Stage.get_display_name(job.current_stage) if job.current_stage else None,
-        'awaiting_input': job.status == JobStatus.PAUSED_FOR_REVIEW
+        'awaiting_input': job.status == JobStatus.PAUSED_FOR_REVIEW,
+        'progress': stage_progress  # Real-time progress tracking
     }
 
     # Include stage preview if paused for review
