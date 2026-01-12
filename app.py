@@ -2459,6 +2459,331 @@ def extract_user_sources(text: str) -> List[Dict[str, str]]:
     return unique_sources
 
 
+def parse_headlines_from_text(text: str) -> List[Dict]:
+    """Parse news compilation text into individual headlines with metadata"""
+    import re
+    from datetime import datetime, timedelta
+
+    headlines = []
+    lines = text.strip().split('\n')
+
+    current_headline = None
+    current_sources = []
+    current_category = "General"
+
+    # Category detection patterns
+    category_patterns = {
+        'Breaking News': r'(?i)breaking|urgent|alert|developing',
+        'Technology': r'(?i)AI|tech|software|digital|cyber|robot|algorithm|data|cloud',
+        'Business': r'(?i)business|market|stock|financial|economy|revenue|profit|earnings|investment',
+        'Crypto': r'(?i)bitcoin|crypto|blockchain|ethereum|NFT|DeFi|web3',
+        'Geopolitics': r'(?i)war|conflict|diplomacy|sanctions|treaty|alliance|military|defense',
+        'Healthcare': r'(?i)health|medical|drug|vaccine|therapy|clinical|FDA|disease',
+        'Climate': r'(?i)climate|energy|renewable|carbon|emission|sustainable|green|solar',
+        'Entertainment': r'(?i)movie|film|TV|streaming|music|celebrity|awards|gaming'
+    }
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Detect category headers (## Category Name)
+        if line.startswith('##') and not line.startswith('###'):
+            current_category = line.replace('##', '').strip()
+            continue
+
+        # Detect headlines (### Title or **Title**)
+        if line.startswith('###') or (line.startswith('**') and line.endswith('**')):
+            # Save previous headline if exists
+            if current_headline:
+                headlines.append(current_headline)
+
+            # Parse new headline
+            title = line.replace('###', '').replace('**', '').strip()
+
+            # Extract time info if present
+            time_match = re.search(r'\*Published:\s*(\d+)\s*(minutes?|hours?|days?)\s*ago\*', line)
+            hours_ago = 24  # Default
+            if time_match:
+                value = int(time_match.group(1))
+                unit = time_match.group(2)
+                if 'minute' in unit:
+                    hours_ago = value / 60
+                elif 'hour' in unit:
+                    hours_ago = value
+                elif 'day' in unit:
+                    hours_ago = value * 24
+
+            # Determine category for this headline
+            headline_category = current_category
+            for cat_name, pattern in category_patterns.items():
+                if re.search(pattern, title):
+                    headline_category = cat_name
+                    break
+
+            current_headline = {
+                'title': title,
+                'category': headline_category,
+                'published_hours_ago': hours_ago,
+                'source_count': 0,
+                'source_list': [],
+                'content': line
+            }
+            current_sources = []
+
+        # Extract source count (+ 43 sources)
+        elif '+ ' in line and 'sources' in line.lower():
+            source_match = re.search(r'\+\s*(\d+)\s*sources?', line, re.IGNORECASE)
+            if source_match and current_headline:
+                source_count = int(source_match.group(1))
+                current_headline['source_count'] = source_count
+
+                # Extract actual source URLs from the line
+                sources_text = line.split('Sources:')[-1] if 'Sources:' in line else line
+                url_pattern = r'https?://[^\s\]|)]+'
+                urls = re.findall(url_pattern, sources_text)
+                current_headline['source_list'] = urls
+
+        # Add content lines to current headline
+        elif current_headline and line and not line.startswith('#'):
+            current_headline['content'] += '\n' + line
+
+    # Add last headline
+    if current_headline:
+        headlines.append(current_headline)
+
+    logger.info(f"Parsed {len(headlines)} headlines from news compilation")
+    return headlines
+
+
+def calculate_priority_score(headline: Dict) -> float:
+    """Calculate priority score for a headline based on multiple factors"""
+
+    score = 0.0
+
+    # Recency scoring (0-30 points) - more recent = higher priority
+    hours_ago = headline.get('published_hours_ago', 24)
+    if hours_ago < 1:
+        score += 30  # Breaking news within 1 hour
+    elif hours_ago < 4:
+        score += 25  # Very recent
+    elif hours_ago < 12:
+        score += 15  # Recent
+    elif hours_ago < 24:
+        score += 5   # Today
+    # Older than 24 hours = 0 points
+
+    # Source count scoring (0-25 points) - more sources = higher priority
+    source_count = headline.get('source_count', 0)
+    if source_count >= 50:
+        score += 25
+    elif source_count >= 30:
+        score += 20
+    elif source_count >= 20:
+        score += 15
+    elif source_count >= 10:
+        score += 10
+    elif source_count >= 5:
+        score += 5
+
+    # Category impact scoring (0-20 points)
+    category_weights = {
+        'Breaking News': 20,
+        'Geopolitics': 18,
+        'Business': 15,
+        'Technology': 12,
+        'Crypto': 10,
+        'Healthcare': 10,
+        'Climate': 8,
+        'Entertainment': 5
+    }
+
+    category = headline.get('category', 'General')
+    score += category_weights.get(category, 5)
+
+    # Content quality scoring (0-15 points)
+    title = headline.get('title', '').lower()
+    content = headline.get('content', '').lower()
+
+    # High-impact keywords
+    high_impact_keywords = [
+        'trillion', 'billion', 'breakthrough', 'crisis', 'emergency',
+        'record', 'unprecedented', 'major', 'historic', 'critical'
+    ]
+
+    for keyword in high_impact_keywords:
+        if keyword in title or keyword in content:
+            score += 3  # Max 15 points possible
+
+    # Cross-category relevance (0-10 points)
+    cross_category_keywords = [
+        'global', 'worldwide', 'international', 'market', 'economy',
+        'government', 'policy', 'regulation', 'security', 'future'
+    ]
+
+    cross_category_count = sum(1 for keyword in cross_category_keywords
+                              if keyword in title or keyword in content)
+    score += min(cross_category_count * 2, 10)
+
+    return score
+
+
+def prioritize_news_content(headlines_data: List[Dict]) -> Dict:
+    """Intelligent news prioritization for efficient processing"""
+
+    if not headlines_data:
+        return {
+            'tier_1_full': [],
+            'tier_2_brief': [],
+            'tier_3_merge': []
+        }
+
+    # Calculate priority scores
+    priority_scores = []
+    for headline in headlines_data:
+        score = calculate_priority_score(headline)
+        priority_scores.append((headline, score))
+
+    # Sort by priority score (highest first)
+    sorted_headlines = sorted(priority_scores, key=lambda x: x[1], reverse=True)
+
+    # Distribute into tiers based on score thresholds and counts
+    tier_1_full = []
+    tier_2_brief = []
+    tier_3_merge = []
+
+    for headline, score in sorted_headlines:
+        if len(tier_1_full) < 25 and score >= 60:
+            # High priority: Full discussion
+            tier_1_full.append(headline)
+        elif len(tier_2_brief) < 75 and score >= 30:
+            # Medium priority: Brief mention
+            tier_2_brief.append(headline)
+        else:
+            # Low priority: Merge with related or context only
+            tier_3_merge.append(headline)
+
+    # Ensure we have balanced distribution even with lower scores
+    if len(tier_1_full) < 15 and len(sorted_headlines) > 15:
+        # Move some tier 2 to tier 1 to ensure adequate full coverage
+        needed = 15 - len(tier_1_full)
+        for i in range(min(needed, len(tier_2_brief))):
+            tier_1_full.append(tier_2_brief.pop(0))
+
+    logger.info(f"News prioritization: {len(tier_1_full)} full, {len(tier_2_brief)} brief, {len(tier_3_merge)} merge")
+
+    return {
+        'tier_1_full': tier_1_full,
+        'tier_2_brief': tier_2_brief,
+        'tier_3_merge': tier_3_merge
+    }
+
+
+def efficient_source_selection(sources: List[str], target_count: int) -> List[str]:
+    """Select optimal sources for research efficiency"""
+
+    if not sources or target_count <= 0:
+        return []
+
+    if len(sources) <= target_count:
+        return sources
+
+    # Score sources by authority, recency, and diversity
+    scored_sources = []
+
+    for source in sources:
+        score = 0.0
+        source_lower = source.lower()
+
+        # Authority scoring - trusted news sources get higher scores
+        authority_domains = {
+            'reuters.com': 10, 'bloomberg.com': 10, 'wsj.com': 9, 'ft.com': 9,
+            'nytimes.com': 8, 'washingtonpost.com': 8, 'cnn.com': 7, 'bbc.com': 7,
+            'cnbc.com': 8, 'forbes.com': 7, 'businessinsider.com': 6,
+            'techcrunch.com': 7, 'arstechnica.com': 7, 'theverge.com': 6,
+            'arxiv.org': 9, 'nature.com': 10, 'science.org': 10,
+            'github.com': 6, 'linkedin.com': 5, 'youtube.com': 4
+        }
+
+        for domain, auth_score in authority_domains.items():
+            if domain in source_lower:
+                score += auth_score
+                break
+        else:
+            # Default score for unknown domains
+            if 'https://' in source_lower:
+                score += 3
+
+        # Recency bonus for time-sensitive sources
+        if any(time_word in source_lower for time_word in ['today', 'breaking', 'live', 'update']):
+            score += 3
+
+        # Content type diversity
+        if 'pdf' in source_lower or 'report' in source_lower:
+            score += 2  # Primary documents
+        elif 'twitter.com' in source_lower or 'x.com' in source_lower:
+            score += 1  # Social media
+        elif 'gov' in source_lower or '.org' in source_lower:
+            score += 4  # Official sources
+
+        scored_sources.append((source, score))
+
+    # Sort by score (highest first) and return top N
+    sorted_sources = sorted(scored_sources, key=lambda x: x[1], reverse=True)
+    selected_sources = [source for source, score in sorted_sources[:target_count]]
+
+    logger.info(f"Selected {len(selected_sources)} sources from {len(sources)} available")
+
+    return selected_sources
+
+
+def detect_news_compilation_format(text: str) -> bool:
+    """Detect if text is a comprehensive news compilation that would benefit from prioritization"""
+    import re
+
+    # Count potential headlines in various formats
+    headline_patterns = [
+        r'^###\s+.*$',                    # ### Headlines
+        r'^\*\*.*\*\*$',                  # **Bold Headlines**
+        r'^\*Published:\s*\d+.*ago\*',    # *Published: X hours ago*
+        r'\+\s*\d{2,}\s*sources?',        # + 43 sources
+    ]
+
+    headline_count = 0
+    source_mentions = 0
+
+    lines = text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        for pattern in headline_patterns[:2]:  # Count headlines
+            if re.match(pattern, line, re.MULTILINE):
+                headline_count += 1
+                break
+
+        # Count source mentions
+        if re.search(headline_patterns[3], line):
+            source_mentions += 1
+
+    # Detect category structures typical of news compilations
+    category_count = len(re.findall(r'^##\s+[^#]', text, re.MULTILINE))
+
+    # Thresholds for news compilation detection
+    is_news_compilation = (
+        headline_count >= 10 and           # At least 10 headlines
+        source_mentions >= 5 and           # Multiple source citations
+        category_count >= 3                # Multiple news categories
+    )
+
+    if is_news_compilation:
+        logger.info(f"Detected news compilation: {headline_count} headlines, {source_mentions} source mentions, {category_count} categories")
+
+    return is_news_compilation
+
+
 def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
     """Detect distinct topics/sections in the input text."""
 
@@ -3020,6 +3345,161 @@ def run_stage_research(job: Job) -> StageResult:
     )
 
 
+def run_stage_research_with_prioritization(job: Job) -> StageResult:
+    """Enhanced research with intelligent news prioritization for large news compilations"""
+
+    suggestion = job.user_suggestions.get(Stage.RESEARCH, '')
+    length_config = job.get_length_config()
+    research_depth = length_config['research_depth']
+
+    # Step 1: Parse headlines into prioritized tiers
+    headlines_data = parse_headlines_from_text(job.text)
+
+    if not headlines_data:
+        # Fallback to regular episode-based research
+        return run_stage_research(job)
+
+    prioritized_content = prioritize_news_content(headlines_data)
+
+    # Step 2: Allocate research resources by tier
+    research_allocation = {
+        'tier_1_full': {
+            'agent_count': 8,  # Full research depth
+            'sources_per_topic': 10,
+            'research_depth': 'exhaustive'
+        },
+        'tier_2_brief': {
+            'agent_count': 4,  # Moderate research
+            'sources_per_topic': 4,
+            'research_depth': 'thorough'
+        },
+        'tier_3_merge': {
+            'agent_count': 2,  # Minimal research for context
+            'sources_per_topic': 2,
+            'research_depth': 'surface'
+        }
+    }
+
+    # Step 3: Execute tiered research
+    all_research_results = {}
+    all_citations = []
+    total_agents_used = 0
+
+    preview_lines = ["Intelligent news prioritization research complete:\n"]
+
+    for tier_name, content in prioritized_content.items():
+        if not content:
+            continue
+
+        allocation = research_allocation[tier_name]
+        tier_citations = []
+
+        preview_lines.append(f"\n{tier_name.replace('_', ' ').title()} ({len(content)} headlines):")
+
+        for headline in content:
+            # Select efficient source samples for this tier
+            if headline.get('source_list'):
+                selected_sources = efficient_source_selection(
+                    headline['source_list'],
+                    allocation['sources_per_topic']
+                )
+            else:
+                selected_sources = []
+
+            # Create research context similar to existing system
+            research_context = {
+                'topic': headline['title'],
+                'category': headline.get('category', 'General'),
+                'sources': selected_sources,
+                'content': headline.get('content', ''),
+                'priority_score': calculate_priority_score(headline)
+            }
+
+            # Research with appropriate depth using existing parallel research function
+            try:
+                # Use the existing research_episode_parallel but with adapted data
+                fake_episode = {
+                    'topic': headline['title'],
+                    'content': headline.get('content', ''),
+                    'episode_num': len(all_research_results) + 1
+                }
+
+                research_result = research_episode_parallel(
+                    fake_episode,
+                    suggestion,
+                    allocation['agent_count'],
+                    allocation['research_depth'],
+                    job
+                )
+
+                all_research_results[headline['title']] = research_result
+
+                # Extract citations from research result
+                if 'citations' in research_result:
+                    tier_citations.extend(research_result['citations'])
+                    all_citations.extend(research_result['citations'])
+
+                # Add to preview
+                preview_lines.append(f"  • {headline['title'][:80]}... [{allocation['agent_count']} agents]")
+
+                total_agents_used += allocation['agent_count']
+
+            except Exception as e:
+                logger.error(f"Research failed for headline '{headline['title'][:50]}...': {str(e)}")
+                preview_lines.append(f"  • {headline['title'][:80]}... [FAILED]")
+
+        # Add tier summary
+        preview_lines.append(f"    {len(tier_citations)} citations collected")
+
+    # Step 4: Calculate enhanced source breakdown
+    user_source_count = len(job.user_sources) if hasattr(job, 'user_sources') else 0
+    researched_source_count = len(all_citations)
+    total_source_count = user_source_count + researched_source_count
+
+    # Enhanced source count information
+    if user_source_count > 0:
+        source_summary = f"Total: {total_source_count} sources ({user_source_count} user-provided + {researched_source_count} researched)"
+    else:
+        source_summary = f"Total: {researched_source_count} researched sources"
+
+    preview_lines.insert(1, f"{source_summary} across {total_agents_used} research queries\n")
+
+    # Step 5: Citation preview management
+    unique_citations = list(dict.fromkeys(all_citations))
+    preview_citations = unique_citations[:20]
+
+    if len(unique_citations) > 20:
+        citation_note = f"Showing preview of {len(preview_citations)} citations (Total: {len(unique_citations)} available)"
+    else:
+        citation_note = f"All {len(unique_citations)} researched citations shown"
+
+    # Set enhanced metadata for tracking
+    job.research_scaling_applied = True
+    job.total_research_agents = total_agents_used
+
+    logger.info(f"Intelligent news research complete: {len(headlines_data)} headlines processed with {total_agents_used} agents")
+
+    return StageResult(
+        stage=Stage.RESEARCH,
+        output_preview='\n'.join(preview_lines),
+        full_output={'hierarchical_research': all_research_results, 'prioritized_content': prioritized_content},
+        citations=preview_citations,
+        metadata={
+            'total_agents': total_agents_used,
+            'total_headlines': len(headlines_data),
+            'tier_1_count': len(prioritized_content['tier_1_full']),
+            'tier_2_count': len(prioritized_content['tier_2_brief']),
+            'tier_3_count': len(prioritized_content['tier_3_merge']),
+            'total_citations': len(unique_citations),
+            'user_source_count': user_source_count,
+            'total_source_count': total_source_count,
+            'citation_preview_note': citation_note,
+            'efficiency_ratio': f"{len(headlines_data)} headlines → {total_agents_used} agents",
+            'processing_mode': 'intelligent_news_prioritization'
+        }
+    )
+
+
 def run_stage_expand(job: Job) -> StageResult:
     """Expansion stage - GPT-4o expands outlines with research context"""
     episodes = job.episodes
@@ -3461,7 +3941,12 @@ def run_job_stage(job_id: str, stage: Stage):
         if stage == Stage.ANALYZE:
             result = run_stage_analyze(job)
         elif stage == Stage.RESEARCH:
-            result = run_stage_research(job)
+            # Check if content is a news compilation that benefits from intelligent prioritization
+            if detect_news_compilation_format(job.text):
+                logger.info(f"Job {job_id}: Using intelligent news prioritization for large compilation")
+                result = run_stage_research_with_prioritization(job)
+            else:
+                result = run_stage_research(job)
         elif stage == Stage.EXPAND:
             result = run_stage_expand(job)
         elif stage == Stage.ENHANCE:
