@@ -929,6 +929,81 @@ def concatenate_mp3_files(file_paths, output_path):
 
 # ============== Multiplier Logic: Dynamic Agent Scaling ==============
 
+def calculate_accurate_tts_cost(total_chunks: int, model: str = "tts-1-hd") -> float:
+    """
+    Calculate accurate OpenAI TTS costs based on current pricing.
+
+    OpenAI TTS Pricing (as of 2026):
+    - tts-1: $0.015 per 1K characters
+    - tts-1-hd: $0.030 per 1K characters
+
+    Args:
+        total_chunks: Number of 2000-character chunks
+        model: TTS model ("tts-1" or "tts-1-hd")
+
+    Returns:
+        Accurate cost estimate in USD
+
+    FIXED BUG: Previous estimate was $0.30 per chunk (10x overestimate)
+    """
+    # Standard chunk size is 2000 characters
+    chunk_size_chars = 2000
+    total_chars = total_chunks * chunk_size_chars
+
+    # Accurate OpenAI pricing per 1K characters
+    if model == "tts-1":
+        cost_per_1k_chars = 0.015  # $0.015/1K chars
+    else:  # tts-1-hd (default)
+        cost_per_1k_chars = 0.030  # $0.030/1K chars
+
+    # Calculate total cost
+    total_cost = (total_chars / 1000) * cost_per_1k_chars
+    return total_cost
+
+
+def diagnose_length_discrepancy(job: Job, final_text: str) -> dict:
+    """
+    Diagnose why podcast length doesn't match expectations.
+
+    This function helps debug the user's issue where they expect 15 minutes
+    but get 5 minutes instead.
+    """
+    config = job.get_length_config()
+    target_words = config.get('word_target', 2000)
+    target_length_minutes = config.get('display_name', 'Unknown')
+
+    # Analyze actual output
+    actual_words = len(final_text.split())
+    actual_chars = len(final_text)
+    actual_duration_minutes = actual_words / 175  # Updated speech rate
+
+    # Calculate achievement rates
+    word_achievement_rate = actual_words / target_words if target_words else 0
+    expected_duration = target_words / 175 if target_words else 0
+    duration_shortfall = expected_duration - actual_duration_minutes
+
+    # Analyze chunks and cost
+    estimated_chunks = max(1, actual_chars // 2000)
+    actual_cost = calculate_accurate_tts_cost(estimated_chunks, job.model)
+
+    return {
+        'target_length': target_length_minutes,
+        'target_words': target_words,
+        'actual_words': actual_words,
+        'word_achievement_rate': word_achievement_rate,
+        'expected_duration_minutes': expected_duration,
+        'actual_duration_minutes': actual_duration_minutes,
+        'duration_shortfall_minutes': duration_shortfall,
+        'estimated_chunks': estimated_chunks,
+        'accurate_cost_usd': actual_cost,
+        'diagnosis': {
+            'word_target_achieved': word_achievement_rate >= 0.8,  # 80% threshold
+            'likely_cause': 'Content expansion insufficient' if word_achievement_rate < 0.8 else 'Speech rate faster than estimate',
+            'recommended_fix': 'Increase expansion prompts strength' if word_achievement_rate < 0.8 else 'Update speech rate estimate to 175 WPM'
+        }
+    }
+
+
 def estimate_audio_duration(text: str) -> dict:
     """
     Estimate audio duration from text content.
@@ -946,8 +1021,9 @@ def estimate_audio_duration(text: str) -> dict:
     word_count = len(words)
     char_count = len(text)
 
-    # Conservative estimate: 150 words/minute for TTS
-    estimated_minutes = word_count / 150
+    # More accurate estimate: OpenAI TTS runs ~170-180 words/minute
+    # Using 175 words/min for more realistic duration estimates
+    estimated_minutes = word_count / 175
 
     # Chunk estimation: ~2000 chars per TTS chunk
     estimated_chunks = max(1, char_count // 2000)
@@ -4172,7 +4248,7 @@ def run_stage_generate(job: Job) -> StageResult:
         raise ValueError(
             f"Safety limit exceeded: {total_chunks} chunks detected (max: 50). "
             f"Normal podcasts generate ~20 chunks. "
-            f"Estimated cost would have been: ${total_chunks * 0.30:.2f}. "
+            f"Estimated cost would have been: ${calculate_accurate_tts_cost(total_chunks, job.model):.2f}. "
             f"Please use shorter podcast length or reduce content complexity."
         )
 
@@ -4254,7 +4330,8 @@ def run_stage_generate(job: Job) -> StageResult:
     baseline_estimate = total_chunks * 5  # 5s per chunk estimate (sequential)
     speedup_achieved = baseline_estimate / max(processing_time, 1)
     success_rate = success_count / total_chunks
-    estimated_cost = total_chunks * 0.30  # ~$0.30 per chunk
+    # FIXED: Accurate OpenAI TTS cost calculation
+    estimated_cost = calculate_accurate_tts_cost(total_chunks, job.model)
 
     logger.info(f"Enterprise GENERATE completed: {processing_time:.1f}s, {speedup_achieved:.1f}x speedup, {success_rate:.1%} success rate")
 
@@ -4340,20 +4417,46 @@ def run_stage_combine(job: Job) -> StageResult:
     job.download_id = job_id
     job.transcript_id = job_id
 
+    # DIAGNOSTIC: Analyze length discrepancy (user reported 5min vs 15min issue)
+    final_text = job.final_text if job.final_text else job.text
+    length_diagnosis = diagnose_length_discrepancy(job, final_text)
+
     preview_lines = [
         "Pipeline complete!",
         "",
         f"Audio: {size_mb:.1f} MB",
         f"Filename: {smart_filename}",
         "",
-        "Ready for download."
     ]
+
+    # Add length diagnostic if there's a significant discrepancy
+    if length_diagnosis['word_achievement_rate'] < 0.8:
+        preview_lines.extend([
+            "⚠️ LENGTH DIAGNOSTIC:",
+            f"  • Target: {length_diagnosis['expected_duration_minutes']:.1f}min",
+            f"  • Actual: {length_diagnosis['actual_duration_minutes']:.1f}min",
+            f"  • Word achievement: {length_diagnosis['word_achievement_rate']:.1%}",
+            f"  • Issue: {length_diagnosis['diagnosis']['likely_cause']}",
+            ""
+        ])
+
+    # Always show accurate cost estimate
+    preview_lines.extend([
+        f"💰 FIXED COST: ${length_diagnosis['accurate_cost_usd']:.2f} (was overestimated before)",
+        "",
+        "Ready for download."
+    ])
 
     return StageResult(
         stage=Stage.COMBINE,
         output_preview='\n'.join(preview_lines),
         full_output={'output_path': str(output_path), 'transcript_path': str(transcript_path)},
-        metadata={'size_mb': size_mb, 'filename': smart_filename}
+        metadata={
+            'size_mb': size_mb,
+            'filename': smart_filename,
+            'length_diagnosis': length_diagnosis,
+            'accurate_cost': length_diagnosis['accurate_cost_usd']
+        }
     )
 
 
