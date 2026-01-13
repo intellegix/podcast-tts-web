@@ -11,6 +11,7 @@ from datetime import datetime
 from enum import Enum
 import threading
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -221,6 +222,53 @@ class Stage(Enum):
 
 
 @dataclass
+class CallbackReference:
+    """Track comedy callbacks for intelligent spacing"""
+    id: str
+    original_episode: int
+    original_line: str
+    callback_type: str  # "direct", "modified", "thematic"
+    humor_rating: float
+    last_used_timestamp: float
+    usage_count: int
+    optimal_next_use: float  # 10-20 minute spacing
+
+
+@dataclass
+class PersonaState:
+    """Persistent character development across episodes"""
+    character_name: str  # ALEX or SARAH
+    personality_traits: Dict[str, float] = field(default_factory=dict)
+    speaking_patterns: List[str] = field(default_factory=list)
+    humor_preferences: List[str] = field(default_factory=list)
+    relationship_dynamics: Dict[str, str] = field(default_factory=dict)
+    episode_growth: List[Dict] = field(default_factory=list)
+
+
+@dataclass
+class ComedyMetrics:
+    """Quality ranking and optimization tracking"""
+    episode_id: str
+    callback_density: float
+    timing_score: float
+    chemistry_rating: float
+    laugh_prediction: float
+    turn_taking_quality: float
+
+
+@dataclass
+class PerformanceMetrics:
+    """Track stage performance for optimization"""
+    stage: Stage
+    duration: float
+    agents_used: int
+    success_rate: float = 1.0
+    speedup_achieved: float = 1.0
+    quality_score: float = 1.0
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
 class StageResult:
     """Result from a completed pipeline stage"""
     stage: Stage
@@ -285,6 +333,19 @@ class Job:
     research_scaling_applied: bool = False  # Whether dynamic scaling was used
     total_research_agents: int = 0  # Actual agents used (may exceed base config)
 
+    # Performance tracking fields for enterprise optimization
+    performance_metrics: List[PerformanceMetrics] = field(default_factory=list)
+    total_pipeline_duration: float = 0.0
+    parallel_agents_used: Dict[str, int] = field(default_factory=dict)  # stage -> agent count
+    quality_scores: Dict[str, float] = field(default_factory=dict)  # stage -> quality score
+
+    # Comedy-specific fields for comprehensive comedy system
+    comedy_mode: bool = False
+    callback_memory: Dict[str, CallbackReference] = field(default_factory=dict)
+    persona_states: Dict[str, PersonaState] = field(default_factory=dict)
+    comedy_metrics: List[ComedyMetrics] = field(default_factory=list)
+    timing_markers: List[Dict] = field(default_factory=list)
+
     def to_dict(self) -> dict:
         """Convert job to JSON-serializable dict"""
         return {
@@ -298,7 +359,16 @@ class Job:
             'transcript_id': self.transcript_id,
             'is_news_format': self.is_news_format,
             'news_url_count': len(self.news_urls),
-            'detected_topic_count': len(self.detected_topics)
+            'detected_topic_count': len(self.detected_topics),
+            # Performance tracking
+            'total_pipeline_duration': self.total_pipeline_duration,
+            'parallel_agents_used': self.parallel_agents_used,
+            'performance_metrics_count': len(self.performance_metrics),
+            # Comedy system
+            'comedy_mode': self.comedy_mode,
+            'callback_count': len(self.callback_memory),
+            'persona_states_count': len(self.persona_states),
+            'comedy_metrics_count': len(self.comedy_metrics)
         }
 
     def get_stage_preview(self) -> Optional[dict]:

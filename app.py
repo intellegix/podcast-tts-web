@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from functools import wraps
 from collections import deque
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 from flask import Flask, render_template, request, jsonify, send_file, Response, session, redirect, url_for
 from flask_limiter import Limiter
@@ -1776,6 +1776,11 @@ def enhance_episode_with_claude(episode_data):
         if style_guidance:
             prompt_parts.append(f"CRITICAL INSTRUCTION - READ FIRST:\n{style_guidance}\n\n")
 
+        # Add persona consistency for comedy mode (if enabled)
+        if job and job.target_mode == PodcastMode.COMEDY and getattr(job, 'comedy_mode', False):
+            persona_prompt = build_persona_consistency_prompt(job, episode_num)
+            prompt_parts.append(persona_prompt)
+
         # Choose prompt based on mode
         if job and job.target_mode == PodcastMode.COMEDY:
             base_prompt = CLAUDE_COMEDY_PROMPT
@@ -1850,6 +1855,10 @@ def enhance_episode_with_claude(episode_data):
         changes = compute_text_changes(episode_text, enhanced_text)
 
         logger.info(f"Episode {episode_num} enhanced ({len(enhanced_text)} chars, +{changes['words_added']} words)")
+
+        # Update persona states for comedy mode character development tracking
+        if job and job.target_mode == PodcastMode.COMEDY and getattr(job, 'comedy_mode', False):
+            update_persona_states_post_episode(job, episode_num, enhanced_text)
 
         return {
             'episode_num': episode_num,
@@ -3790,31 +3799,43 @@ def _expand_single_episode(episode_data):
     """
     Enterprise-grade single episode expansion function for parallel processing.
     Target: Enable 5x speedup through GeventPool parallelization.
+    Includes comedy callback integration when comedy_mode is enabled.
 
     Args:
-        episode_data: Tuple of (episode_dict, research_context, style_guidance)
+        episode_data: Tuple of (episode_dict, research_context, style_guidance, job)
 
     Returns:
-        Tuple of (ep_num, expanded_text, success, preview_info)
+        Tuple of (ep_num, expanded_text, success, preview_info, callbacks_extracted)
     """
     try:
-        ep, research_context, style_guidance = episode_data
+        ep, research_context, style_guidance, job = episode_data
         ep_num = ep['episode_num']
 
-        # Build complete research context with guidance
-        full_research_context = research_context + style_guidance
+        # Check if comedy mode is enabled
+        if hasattr(job, 'comedy_mode') and job.comedy_mode:
+            # Use comedy-aware expansion with callback integration
+            expanded = generate_comedy_dialogue_with_callbacks(ep['text'], job, ep_num)
+            comedy_mode_used = True
+        else:
+            # Standard expansion
+            full_research_context = research_context + style_guidance
+            expanded = expand_script_with_ai(
+                ep['text'],
+                context="",
+                speakers=['ALEX', 'SARAH'],
+                research_context=full_research_context
+            )
+            comedy_mode_used = False
 
-        # Call OpenAI GPT-4o for expansion
-        expanded = expand_script_with_ai(
-            ep['text'],
-            context="",
-            speakers=['ALEX', 'SARAH'],
-            research_context=full_research_context
-        )
+        # Extract callbacks for future episodes (only in comedy mode)
+        callbacks_extracted = []
+        if comedy_mode_used and expanded != ep['text']:  # Only if expansion was successful
+            callbacks_extracted = extract_callbacks_from_episode(expanded, ep_num)
 
         # Generate preview info for UI feedback
         preview_info = {
-            'message': f"Episode {ep_num}: Expanded to {len(expanded)} chars",
+            'message': f"Episode {ep_num}: Expanded to {len(expanded)} chars" +
+                      (f" (Comedy: {len(callbacks_extracted)} callbacks)" if comedy_mode_used else ""),
             'preview_lines': []
         }
 
@@ -3823,14 +3844,17 @@ def _expand_single_episode(episode_data):
             if line.strip():
                 preview_info['preview_lines'].append(f"  {line[:80]}...")
 
-        return (ep_num, expanded, True, preview_info)
+        if comedy_mode_used and callbacks_extracted:
+            preview_info['preview_lines'].append(f"  🎭 Extracted {len(callbacks_extracted)} comedy callbacks")
+
+        return (ep_num, expanded, True, preview_info, callbacks_extracted)
 
     except Exception as e:
         logger.error(f"Enterprise expansion failed for episode {ep_num}: {e}")
         return (ep_num, ep['text'], False, {
             'message': f"Episode {ep_num}: Expansion failed, using original",
             'preview_lines': []
-        })
+        }, [])
 
 def run_stage_expand(job: Job) -> StageResult:
     """
@@ -3882,7 +3906,8 @@ def run_stage_expand(job: Job) -> StageResult:
         if suggestion:
             style_guidance += f"\n\nUSER GUIDANCE: {suggestion}"
 
-        expansion_tasks.append((ep, research_context, style_guidance))
+        # Include job parameter for comedy mode support
+        expansion_tasks.append((ep, research_context, style_guidance, job))
 
     # PARALLEL EXECUTION: Process all episodes concurrently with Render safety
     start_time = time.time()
@@ -3898,14 +3923,21 @@ def run_stage_expand(job: Job) -> StageResult:
     end_time = time.time()
     processing_time = end_time - start_time
 
-    # Process results and build preview
+    # Process results and build preview (with comedy callback integration)
     expanded_map = {}
     success_count = 0
+    total_callbacks_extracted = 0
 
-    for ep_num, expanded_text, success, preview_info in parallel_results:
+    for ep_num, expanded_text, success, preview_info, callbacks_extracted in parallel_results:
         expanded_map[ep_num] = expanded_text
         if success:
             success_count += 1
+
+        # Store extracted callbacks in job memory for future episodes
+        if callbacks_extracted and hasattr(job, 'callback_memory'):
+            for callback in callbacks_extracted:
+                job.callback_memory[callback.id] = callback
+            total_callbacks_extracted += len(callbacks_extracted)
 
         preview_lines.append(preview_info['message'])
         preview_lines.extend(preview_info['preview_lines'])
@@ -3943,6 +3975,14 @@ def run_stage_expand(job: Job) -> StageResult:
     preview_lines.append(f"  • Success rate: {success_rate:.1%}")
     preview_lines.append(f"  • Agents utilized: {agent_count}/{len(incomplete)} episodes")
 
+    # Comedy system metrics (if comedy mode is enabled)
+    if hasattr(job, 'comedy_mode') and job.comedy_mode:
+        preview_lines.append(f"\n🎭 COMEDY METRICS:")
+        preview_lines.append(f"  • Callbacks extracted: {total_callbacks_extracted}")
+        preview_lines.append(f"  • Total callback memory: {len(job.callback_memory) if hasattr(job, 'callback_memory') else 0}")
+        if total_callbacks_extracted > 0:
+            preview_lines.append(f"  • Comedy system: ACTIVE - Running gags initialized")
+
     return StageResult(
         stage=Stage.EXPAND,
         output_preview='\n'.join(preview_lines),
@@ -3954,7 +3994,12 @@ def run_stage_expand(job: Job) -> StageResult:
             'speedup_achieved': speedup_achieved,
             'success_rate': success_rate,
             'enterprise_mode': True,
-            'parallel_episodes': len(incomplete)
+            'parallel_episodes': len(incomplete),
+            # Comedy system metadata
+            'comedy_mode': getattr(job, 'comedy_mode', False),
+            'callbacks_extracted': total_callbacks_extracted,
+            'total_callback_memory': len(job.callback_memory) if hasattr(job, 'callback_memory') else 0,
+            'comedy_system_active': total_callbacks_extracted > 0 and getattr(job, 'comedy_mode', False)
         }
     )
 
@@ -4125,9 +4170,10 @@ Remember: ALL topics listed above MUST be covered."""
     end_time = time.time()
     processing_time = end_time - start_time
 
-    # Process results and build maps
+    # Process results and build maps (with comedy quality assessment)
     enhanced_map = {}
     success_count = 0
+    comedy_quality_scores = []
 
     for result in parallel_results:
         ep_num = result.get('episode_num', 0)
@@ -4135,6 +4181,17 @@ Remember: ALL topics listed above MUST be covered."""
 
         if result['success']:
             success_count += 1
+
+            # Comedy quality assessment (if comedy mode is enabled)
+            if hasattr(job, 'comedy_mode') and job.comedy_mode:
+                try:
+                    quality_score = comedy_quality_ranker.assess_episode_quality(job, ep_num)
+                    comedy_quality_scores.append(quality_score)
+
+                    # Track comedy performance metrics
+                    track_callback_performance(job, ep_num)
+                except Exception as e:
+                    logger.error(f"Comedy quality assessment failed for episode {ep_num}: {e}")
 
         if result['success'] and result.get('changes'):
             changes = result['changes']
@@ -4195,6 +4252,23 @@ Remember: ALL topics listed above MUST be covered."""
     preview_lines.append(f"  • Agents utilized: {agent_count}/{len(episodes)} episodes")
     preview_lines.append(f"  • Quality assurance: {coverage_result['coverage_rate']:.1%} topic coverage")
 
+    # Comedy quality metrics (if comedy mode is enabled)
+    if hasattr(job, 'comedy_mode') and job.comedy_mode and comedy_quality_scores:
+        avg_comedy_quality = sum(comedy_quality_scores) / len(comedy_quality_scores)
+        preview_lines.append(f"\n🎭 COMEDY QUALITY METRICS:")
+        preview_lines.append(f"  • Average comedy quality: {avg_comedy_quality:.3f}")
+        preview_lines.append(f"  • Episodes assessed: {len(comedy_quality_scores)}")
+        preview_lines.append(f"  • Total callbacks in memory: {len(job.callback_memory) if hasattr(job, 'callback_memory') else 0}")
+        preview_lines.append(f"  • Persona states tracked: {len(job.persona_states) if hasattr(job, 'persona_states') else 0}")
+
+        # Add improvement recommendations if quality is below threshold
+        if avg_comedy_quality < 0.75:
+            recommendations = comedy_quality_ranker.provide_improvement_recommendations(job)
+            if recommendations:
+                preview_lines.append(f"  💡 Recommendations: {recommendations[0]}")
+        else:
+            preview_lines.append(f"  ✅ Comedy quality looks excellent!")
+
     return StageResult(
         stage=Stage.ENHANCE,
         output_preview='\n'.join(preview_lines),
@@ -4212,7 +4286,14 @@ Remember: ALL topics listed above MUST be covered."""
             'speedup_achieved': speedup_achieved,
             'success_rate': success_rate,
             'enterprise_mode': True,
-            'parallel_episodes': len(episodes)
+            'parallel_episodes': len(episodes),
+            # Comedy quality metadata
+            'comedy_mode': getattr(job, 'comedy_mode', False),
+            'comedy_quality_scores': comedy_quality_scores,
+            'average_comedy_quality': sum(comedy_quality_scores) / len(comedy_quality_scores) if comedy_quality_scores else None,
+            'comedy_episodes_assessed': len(comedy_quality_scores),
+            'comedy_callbacks_total': len(job.callback_memory) if hasattr(job, 'callback_memory') else 0,
+            'comedy_persona_states': len(job.persona_states) if hasattr(job, 'persona_states') else 0
         }
     )
 
@@ -4226,6 +4307,12 @@ def run_stage_generate(job: Job) -> StageResult:
 
     # Preprocess text
     processed = preprocess_text(text)
+
+    # Apply comedy timing layer if comedy mode is enabled
+    if getattr(job, 'comedy_mode', False):
+        logger.info("🎭 Applying comedy timing layer with SSML markers")
+        processed = add_comedy_timing_markers(processed, job)
+        logger.info(f"Comedy timing applied: {processed.count('<break')} breaks, {processed.count('<prosody')} prosody markers")
 
     # Split into chunks
     if job.multi_voice:
@@ -4849,6 +4936,1306 @@ def get_optimization_recommendations():
             'error': 'Failed to generate recommendations',
             'message': str(e)
         }), 500
+
+
+# ============================================================================
+# COMPREHENSIVE COMEDY SYSTEM IMPLEMENTATION
+# ============================================================================
+
+def generate_comedy_dialogue_with_callbacks(episode_text: str, job: Job, episode_num: int) -> str:
+    """
+    Generate dialogue with intelligent callback integration.
+    Core component of the enterprise comedy system with temporal spacing heuristics.
+    """
+    try:
+        # Phase 1: Generate base dialogue
+        research_context = job.research_map.get(episode_num, '')
+        base_dialogue = expand_script_with_ai(episode_text, research_context)
+
+        # Phase 2: Identify callback opportunities (only after episode 1)
+        if episode_num > 1 and job.callback_memory:
+            current_time = time.time()
+            available_callbacks = [cb for cb in job.callback_memory.values()
+                                  if should_use_callback(cb, current_time)]
+
+            # Phase 3: Integrate callbacks naturally
+            if available_callbacks:
+                selected_callbacks = select_optimal_callbacks(available_callbacks, base_dialogue)
+                if selected_callbacks:
+                    enhanced_dialogue = integrate_callbacks(base_dialogue, selected_callbacks)
+
+                    # Update callback usage tracking
+                    for callback in selected_callbacks:
+                        callback.last_used_timestamp = current_time
+                        callback.usage_count += 1
+
+                    logger.info(f"Comedy system: Episode {episode_num} integrated {len(selected_callbacks)} callbacks")
+                    return enhanced_dialogue
+
+        return base_dialogue
+
+    except Exception as e:
+        logger.error(f"Comedy dialogue generation failed for episode {episode_num}: {e}")
+        return episode_text
+
+
+def should_use_callback(callback, current_time: float) -> bool:
+    """
+    Determine if callback should be used based on timing heuristics.
+    Implements 10-20 minute optimal spacing from comedy research.
+    """
+    try:
+        time_since_last_use = current_time - callback.last_used_timestamp
+
+        # Dynamic spacing: 10 minutes + 5 minutes per previous use (max 20 minutes)
+        base_spacing = 600  # 10 minutes
+        usage_penalty = callback.usage_count * 300  # 5 minutes per use
+        optimal_spacing = min(base_spacing + usage_penalty, 1200)  # Max 20 minutes
+
+        # Higher humor rating = slightly shorter spacing (more tolerance)
+        humor_bonus = (callback.humor_rating / 10) * 60  # Up to 1 minute bonus
+        final_spacing = optimal_spacing - humor_bonus
+
+        return time_since_last_use >= final_spacing
+
+    except Exception as e:
+        logger.error(f"Callback timing check failed: {e}")
+        return False
+
+
+def select_optimal_callbacks(available_callbacks, base_dialogue: str) -> List:
+    """
+    Select best callbacks for integration based on context relevance and humor potential.
+    Prevents callback overload while maximizing comedy impact.
+    """
+    try:
+        # Import here to avoid circular import issues
+        from job_store import CallbackReference
+
+        if not available_callbacks:
+            return []
+
+        # Score callbacks by relevance and humor potential
+        scored_callbacks = []
+        dialogue_words = base_dialogue.lower().split()
+
+        for callback in available_callbacks:
+            # Basic relevance score based on shared words
+            callback_words = callback.original_line.lower().split()
+            shared_words = set(dialogue_words) & set(callback_words)
+            relevance_score = len(shared_words) / max(len(callback_words), 1)
+
+            # Combine with humor rating
+            total_score = (relevance_score * 0.4) + (callback.humor_rating / 10 * 0.6)
+            scored_callbacks.append((callback, total_score))
+
+        # Sort by score and select top callbacks (max 2 per episode to avoid overload)
+        scored_callbacks.sort(key=lambda x: x[1], reverse=True)
+        return [cb for cb, score in scored_callbacks[:2] if score > 0.3]
+
+    except Exception as e:
+        logger.error(f"Callback selection failed: {e}")
+        return []
+
+
+def integrate_callbacks(dialogue: str, callbacks) -> str:
+    """
+    Naturally weave callbacks into dialogue flow using Claude.
+    Maintains conversation naturalness while adding comedy callbacks.
+    """
+    try:
+        if not callbacks:
+            return dialogue
+
+        callback_lines = [cb.original_line for cb in callbacks]
+        callback_info = "\n".join([f"- \"{line}\" (Episode {cb.original_episode})"
+                                  for cb, line in zip(callbacks, callback_lines)])
+
+        integration_prompt = f"""Integrate these comedy callbacks naturally into the dialogue. These are running gags from previous episodes that should be referenced naturally:
+
+ORIGINAL DIALOGUE:
+{dialogue}
+
+CALLBACKS TO INTEGRATE:
+{callback_info}
+
+INTEGRATION GUIDELINES:
+- Make callbacks feel natural, not forced
+- Use transitions like "Remember when..." or "That reminds me of..."
+- Modify callback slightly for freshness while keeping the humor
+- Ensure ALEX/SARAH personality consistency
+- Keep the original dialogue flow intact
+- Only integrate if it fits naturally - don't force it
+
+Return the enhanced dialogue with callbacks integrated naturally."""
+
+        return call_claude_for_callback_integration(integration_prompt)
+
+    except Exception as e:
+        logger.error(f"Callback integration failed: {e}")
+        return dialogue
+
+
+def call_claude_for_callback_integration(prompt: str) -> str:
+    """
+    Call Claude API for intelligent callback integration.
+    Uses existing Claude client with error handling.
+    """
+    try:
+        if not CLAUDE_API_KEY:
+            logger.warning("Claude API not available for callback integration")
+            return prompt.split("ORIGINAL DIALOGUE:\n")[1].split("\nCALLBACKS TO INTEGRATE:")[0]
+
+        # Use the existing Claude call pattern from enhance_episode_with_claude
+        response = anthropic.Anthropic(api_key=CLAUDE_API_KEY).messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=4000,
+            messages=[{
+                "role": "user",
+                "content": prompt
+            }]
+        )
+
+        return response.content[0].text.strip()
+
+    except Exception as e:
+        logger.error(f"Claude callback integration API call failed: {e}")
+        # Fallback: return original dialogue
+        return prompt.split("ORIGINAL DIALOGUE:\n")[1].split("\nCALLBACKS TO INTEGRATE:")[0]
+
+
+def extract_callbacks_from_episode(episode_text: str, episode_num: int):
+    """
+    Extract potential callback material from completed episode.
+    Identifies funny moments that could become running gags.
+    """
+    try:
+        # Import here to avoid circular import issues
+        from job_store import CallbackReference
+
+        extraction_prompt = f"""Analyze this comedy dialogue for callback potential. Identify lines or moments that could become running gags in future episodes:
+
+EPISODE {episode_num} DIALOGUE:
+{episode_text}
+
+IDENTIFY CALLBACK OPPORTUNITIES:
+Look for:
+- Funny phrases or unexpected reactions
+- Character quirks or repeated mistakes
+- Situational comedy moments
+- Unique observations or responses
+- Memorable wordplay or expressions
+
+For each potential callback, provide:
+1. The exact line or phrase
+2. Why it's funny/memorable
+3. Callback type: "direct" (exact repeat), "modified" (variations), or "thematic" (concept reference)
+4. Humor rating (1-10, where 8+ are strong candidates)
+
+Return as JSON format:
+[{{"line": "exact text", "reason": "why funny", "type": "direct/modified/thematic", "rating": 8}}]"""
+
+        if not CLAUDE_API_KEY:
+            logger.warning("Claude API not available for callback extraction")
+            return []
+
+        # Call Claude for extraction
+        response = anthropic.Anthropic(api_key=CLAUDE_API_KEY).messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=2000,
+            messages=[{
+                "role": "user",
+                "content": extraction_prompt
+            }]
+        )
+
+        result_text = response.content[0].text.strip()
+
+        # Parse JSON response
+        import json
+        try:
+            callback_candidates = json.loads(result_text)
+        except json.JSONDecodeError:
+            # Fallback parsing if JSON is malformed
+            logger.warning("Failed to parse callback extraction JSON, using fallback")
+            return []
+
+        # Convert to CallbackReference objects
+        callbacks = []
+        current_time = time.time()
+
+        for i, candidate in enumerate(callback_candidates):
+            if candidate.get('rating', 0) >= 6:  # Only use high-quality callbacks
+                callback = CallbackReference(
+                    id=f"ep{episode_num}_{i}",
+                    original_episode=episode_num,
+                    original_line=candidate['line'],
+                    callback_type=candidate.get('type', 'direct'),
+                    humor_rating=candidate.get('rating', 5.0),
+                    last_used_timestamp=current_time,
+                    usage_count=0,
+                    optimal_next_use=current_time + 600  # 10 minutes minimum
+                )
+                callbacks.append(callback)
+
+        logger.info(f"Comedy system: Extracted {len(callbacks)} callbacks from episode {episode_num}")
+        return callbacks
+
+    except Exception as e:
+        logger.error(f"Callback extraction failed for episode {episode_num}: {e}")
+        return []
+
+
+def track_callback_performance(job: Job, episode_num: int):
+    """
+    Track callback effectiveness and adjust algorithms.
+    Implements comedy quality metrics for continuous improvement.
+    """
+    try:
+        # Import here to avoid circular import issues
+        from job_store import ComedyMetrics
+
+        current_time = time.time()
+        episode_callbacks = [cb for cb in job.callback_memory.values()
+                           if cb.last_used_timestamp > current_time - 3600]  # Used in last hour
+
+        if episode_callbacks:
+            # Calculate comedy metrics
+            callback_density = len(episode_callbacks) / max(len(job.episodes), 1)
+            timing_quality = calculate_timing_quality(episode_callbacks)
+            chemistry_rating = assess_chemistry_improvement(job)
+            laugh_prediction = predict_laugh_response(episode_callbacks)
+            turn_taking_quality = analyze_dialogue_flow(job.final_text or job.text)
+
+            comedy_metric = ComedyMetrics(
+                episode_id=f"ep_{episode_num}",
+                callback_density=callback_density,
+                timing_score=timing_quality,
+                chemistry_rating=chemistry_rating,
+                laugh_prediction=laugh_prediction,
+                turn_taking_quality=turn_taking_quality
+            )
+
+            job.comedy_metrics.append(comedy_metric)
+            logger.info(f"Comedy metrics tracked for episode {episode_num}: density={callback_density:.2f}")
+
+    except Exception as e:
+        logger.error(f"Callback performance tracking failed: {e}")
+
+
+def calculate_timing_quality(callbacks) -> float:
+    """Calculate timing quality score for callbacks (0-1)."""
+    if not callbacks:
+        return 0.8  # Neutral score
+
+    # Simple heuristic: callbacks with good spacing score higher
+    current_time = time.time()
+    timing_scores = []
+
+    for cb in callbacks:
+        time_since_creation = current_time - cb.last_used_timestamp
+        optimal_range = 600 <= time_since_creation <= 1200  # 10-20 minutes
+        timing_scores.append(1.0 if optimal_range else 0.6)
+
+    return sum(timing_scores) / len(timing_scores)
+
+
+def assess_chemistry_improvement(job: Job) -> float:
+    """Assess ALEX/SARAH chemistry improvement (0-1)."""
+    # Simple heuristic based on callback usage and episode count
+    if len(job.episodes) <= 1:
+        return 0.7  # Baseline
+
+    callback_usage = len(job.callback_memory)
+    episode_count = len(job.episodes)
+
+    # More callbacks across episodes = better chemistry
+    chemistry_score = min(callback_usage / (episode_count * 2), 1.0)
+    return max(chemistry_score, 0.5)  # Minimum baseline
+
+
+def predict_laugh_response(callbacks) -> float:
+    """Predict laugh response based on callback quality (0-1)."""
+    if not callbacks:
+        return 0.7  # Neutral prediction
+
+    humor_ratings = [cb.humor_rating for cb in callbacks]
+    avg_rating = sum(humor_ratings) / len(humor_ratings)
+
+    # Convert 1-10 rating to 0-1 probability
+    return min(avg_rating / 10, 1.0)
+
+
+def analyze_dialogue_flow(text: str) -> float:
+    """Analyze dialogue turn-taking quality (0-1)."""
+    if not text:
+        return 0.5
+
+    # Count ALEX/SARAH alternations as proxy for good flow
+    lines = text.split('\n')
+    speaker_lines = [line for line in lines if line.startswith(('ALEX:', 'SARAH:'))]
+
+    if len(speaker_lines) < 2:
+        return 0.5
+
+    # Count speaker alternations
+    alternations = 0
+    current_speaker = None
+
+    for line in speaker_lines:
+        speaker = line.split(':')[0]
+        if current_speaker and current_speaker != speaker:
+            alternations += 1
+        current_speaker = speaker
+
+    # Higher alternation rate = better turn-taking
+    alternation_rate = alternations / max(len(speaker_lines) - 1, 1)
+    return min(alternation_rate * 1.5, 1.0)  # Scale up to reward good alternation
+
+
+# ============================================================================
+# PERSONA CONSISTENCY SYSTEM FOR ALEX/SARAH CHARACTER EVOLUTION
+# ============================================================================
+
+def create_default_alex_persona():
+    """
+    Create default persona state for ALEX character.
+    Based on established ALEX characteristics from existing comedy framework.
+    """
+    from job_store import PersonaState
+
+    return PersonaState(
+        character_name="ALEX",
+        personality_traits={
+            "curiosity": 0.9,        # High - asks lots of questions
+            "analytical": 0.8,       # Tends to break things down
+            "enthusiasm": 0.7,       # Engaged and energetic
+            "skepticism": 0.6,       # Questions things, plays devil's advocate
+            "humor_initiator": 0.8   # Often sets up comedic situations
+        },
+        speaking_patterns=[
+            "asks follow-up questions",
+            "uses 'Wait, so...' to clarify",
+            "provides setup for SARAH's punchlines",
+            "expresses surprise with 'Really?!' or 'No way!'",
+            "uses observational humor starters"
+        ],
+        humor_preferences=[
+            "observational comedy",
+            "setup/punchline structure",
+            "asking 'what if' questions",
+            "expressing disbelief for comedic effect"
+        ],
+        relationship_dynamics={
+            "role": "curious questioner",
+            "chemistry_type": "complementary",
+            "interaction_style": "supportive skeptic"
+        },
+        episode_growth=[]
+    )
+
+
+def create_default_sarah_persona():
+    """
+    Create default persona state for SARAH character.
+    Based on established SARAH characteristics from existing comedy framework.
+    """
+    from job_store import PersonaState
+
+    return PersonaState(
+        character_name="SARAH",
+        personality_traits={
+            "knowledge_sharing": 0.9,  # Explains things well
+            "wit": 0.8,               # Quick with comebacks
+            "patience": 0.7,          # Handles ALEX's questions well
+            "storytelling": 0.8,      # Good with examples and anecdotes
+            "humor_delivery": 0.9     # Delivers punchlines effectively
+        },
+        speaking_patterns=[
+            "uses 'Think of it like...' analogies",
+            "provides detailed explanations",
+            "delivers punchlines with confidence",
+            "uses 'Exactly!' to agree enthusiastically",
+            "tells relevant stories and examples"
+        ],
+        humor_preferences=[
+            "analogical humor",
+            "storytelling with twists",
+            "explaining through funny examples",
+            "witty comebacks and observations"
+        ],
+        relationship_dynamics={
+            "role": "knowledgeable explainer",
+            "chemistry_type": "complementary",
+            "interaction_style": "patient educator"
+        },
+        episode_growth=[]
+    )
+
+
+def build_persona_consistency_prompt(job: Job, episode_num: int) -> str:
+    """
+    Build persona-aware enhancement prompt for character consistency.
+    Ensures ALEX and SARAH maintain and naturally evolve their personalities.
+    """
+    try:
+        # Initialize persona states if not present
+        if not hasattr(job, 'persona_states') or not job.persona_states:
+            job.persona_states = {
+                'ALEX': create_default_alex_persona(),
+                'SARAH': create_default_sarah_persona()
+            }
+
+        alex_state = job.persona_states.get('ALEX', create_default_alex_persona())
+        sarah_state = job.persona_states.get('SARAH', create_default_sarah_persona())
+
+        # Build dynamic persona prompt based on character growth
+        recent_alex_growth = alex_state.episode_growth[-3:] if len(alex_state.episode_growth) > 3 else alex_state.episode_growth
+        recent_sarah_growth = sarah_state.episode_growth[-3:] if len(sarah_state.episode_growth) > 3 else sarah_state.episode_growth
+
+        persona_prompt = f"""
+=== PERSONA CONSISTENCY ENFORCEMENT - EPISODE {episode_num} ===
+
+ALEX Character Profile:
+- Core traits: {', '.join(f'{k}={v:.1f}' for k, v in alex_state.personality_traits.items())}
+- Speaking patterns: {'; '.join(alex_state.speaking_patterns)}
+- Humor style: {', '.join(alex_state.humor_preferences)}
+- Role in dialogue: {alex_state.relationship_dynamics.get('role', 'curious questioner')}
+
+SARAH Character Profile:
+- Core traits: {', '.join(f'{k}={v:.1f}' for k, v in sarah_state.personality_traits.items())}
+- Speaking patterns: {'; '.join(sarah_state.speaking_patterns)}
+- Humor style: {', '.join(sarah_state.humor_preferences)}
+- Role in dialogue: {sarah_state.relationship_dynamics.get('role', 'knowledgeable explainer')}
+
+RELATIONSHIP DYNAMICS:
+- Chemistry level: {calculate_chemistry_score(alex_state, sarah_state):.1f}/10
+- Interaction style: Complementary (ALEX asks, SARAH explains with humor)
+- Established rhythm: Question → Answer → Joke → Follow-up
+
+CHARACTER GROWTH TRACKING:
+{"ALEX recent evolution: " + str(recent_alex_growth) if recent_alex_growth else "ALEX: First appearance, establish baseline"}
+{"SARAH recent evolution: " + str(recent_sarah_growth) if recent_sarah_growth else "SARAH: First appearance, establish baseline"}
+
+PERSONA CONSISTENCY REQUIREMENTS:
+1. ALEX MUST maintain curiosity and questioning nature
+2. SARAH MUST maintain explaining and storytelling strengths
+3. Both characters should show subtle growth while keeping core personalities
+4. Maintain established speaking patterns and humor preferences
+5. Build on previous character development from earlier episodes
+6. Ensure natural back-and-forth that feels authentic to these personas
+
+CRITICAL: Maintain character consistency while allowing natural personality evolution.
+=== END PERSONA CONSISTENCY ===
+
+"""
+        return persona_prompt
+
+    except Exception as e:
+        logger.error(f"Persona consistency prompt building failed: {e}")
+        return "Maintain ALEX/SARAH character consistency with natural dialogue flow."
+
+
+def calculate_chemistry_score(alex_state, sarah_state) -> float:
+    """
+    Calculate chemistry score between ALEX and SARAH (0-10 scale).
+    Based on personality trait complementarity and growth consistency.
+    """
+    try:
+        # Complementarity scoring: opposite traits work well together
+        alex_traits = alex_state.personality_traits
+        sarah_traits = sarah_state.personality_traits
+
+        # ALEX's curiosity should complement SARAH's knowledge_sharing
+        curiosity_knowledge = alex_traits.get('curiosity', 0.5) * sarah_traits.get('knowledge_sharing', 0.5)
+
+        # ALEX's setup ability should complement SARAH's humor delivery
+        setup_delivery = alex_traits.get('humor_initiator', 0.5) * sarah_traits.get('humor_delivery', 0.5)
+
+        # Growth consistency: similar growth trajectories indicate good chemistry
+        alex_growth_count = len(alex_state.episode_growth)
+        sarah_growth_count = len(sarah_state.episode_growth)
+        growth_consistency = 1.0 - abs(alex_growth_count - sarah_growth_count) / max(alex_growth_count + sarah_growth_count, 1)
+
+        # Base chemistry score
+        base_score = (curiosity_knowledge + setup_delivery + growth_consistency) / 3
+
+        # Scale to 0-10 and add baseline
+        chemistry_score = 5.0 + (base_score * 5.0)  # 5-10 range
+
+        return min(chemistry_score, 10.0)
+
+    except Exception as e:
+        logger.error(f"Chemistry score calculation failed: {e}")
+        return 7.0  # Default moderate chemistry
+
+
+def update_persona_states_post_episode(job: Job, episode_num: int, final_text: str):
+    """
+    Update persona states after episode completion.
+    Tracks character development and speaking pattern evolution.
+    """
+    try:
+        if not hasattr(job, 'persona_states') or not job.persona_states:
+            logger.info(f"Initializing persona states for episode {episode_num}")
+            job.persona_states = {
+                'ALEX': create_default_alex_persona(),
+                'SARAH': create_default_sarah_persona()
+            }
+
+        # Extract character lines from the episode
+        alex_lines = extract_character_lines(final_text, 'ALEX')
+        sarah_lines = extract_character_lines(final_text, 'SARAH')
+
+        # Update ALEX persona
+        if alex_lines:
+            alex_evolution = extract_personality_evolution(alex_lines, 'ALEX')
+            alex_speaking = extract_speaking_patterns(alex_lines)
+
+            job.persona_states['ALEX'].episode_growth.append({
+                'episode': episode_num,
+                'new_traits': alex_evolution,
+                'speaking_evolution': alex_speaking,
+                'line_count': len(alex_lines),
+                'character_development': analyze_character_development(alex_lines, 'ALEX')
+            })
+
+        # Update SARAH persona
+        if sarah_lines:
+            sarah_evolution = extract_personality_evolution(sarah_lines, 'SARAH')
+            sarah_speaking = extract_speaking_patterns(sarah_lines)
+
+            job.persona_states['SARAH'].episode_growth.append({
+                'episode': episode_num,
+                'new_traits': sarah_evolution,
+                'speaking_evolution': sarah_speaking,
+                'line_count': len(sarah_lines),
+                'character_development': analyze_character_development(sarah_lines, 'SARAH')
+            })
+
+        logger.info(f"Persona states updated for episode {episode_num}: ALEX={len(alex_lines)} lines, SARAH={len(sarah_lines)} lines")
+
+    except Exception as e:
+        logger.error(f"Persona state update failed for episode {episode_num}: {e}")
+
+
+def extract_character_lines(text: str, character: str) -> List[str]:
+    """Extract all lines spoken by a specific character."""
+    try:
+        lines = text.split('\n')
+        character_lines = []
+
+        for line in lines:
+            if line.strip().startswith(f"{character}:"):
+                # Remove the character prefix and clean the line
+                clean_line = line.replace(f"{character}:", "").strip()
+                if clean_line:
+                    character_lines.append(clean_line)
+
+        return character_lines
+
+    except Exception as e:
+        logger.error(f"Character line extraction failed for {character}: {e}")
+        return []
+
+
+def extract_personality_evolution(lines: List[str], character: str) -> Dict[str, float]:
+    """
+    Analyze character lines to detect personality trait evolution.
+    Returns trait adjustments based on dialogue content.
+    """
+    try:
+        if not lines:
+            return {}
+
+        evolution = {}
+
+        # Count question marks (curiosity indicator)
+        question_count = sum(line.count('?') for line in lines)
+        if question_count > len(lines) * 0.3:  # More than 30% questions
+            evolution['curiosity'] = 0.1 if character == 'ALEX' else -0.05
+
+        # Count exclamation marks (enthusiasm indicator)
+        exclamation_count = sum(line.count('!') for line in lines)
+        if exclamation_count > len(lines) * 0.2:  # More than 20% exclamations
+            evolution['enthusiasm'] = 0.1
+
+        # Look for explanation patterns (knowledge sharing)
+        explanation_patterns = ['think of it', 'basically', 'essentially', 'in other words']
+        explanation_count = sum(1 for line in lines if any(pattern in line.lower() for pattern in explanation_patterns))
+        if explanation_count > 1:
+            evolution['knowledge_sharing'] = 0.1 if character == 'SARAH' else 0.05
+
+        return evolution
+
+    except Exception as e:
+        logger.error(f"Personality evolution extraction failed: {e}")
+        return {}
+
+
+def extract_speaking_patterns(lines: List[str]) -> List[str]:
+    """
+    Identify new speaking patterns from character lines.
+    Returns list of observed patterns in this episode.
+    """
+    try:
+        patterns = []
+
+        if not lines:
+            return patterns
+
+        # Common pattern indicators
+        question_starters = ['wait', 'so', 'what if', 'how', 'why']
+        explanation_starters = ['think of it', 'basically', 'exactly', 'well']
+        humor_indicators = ['funny thing', 'reminds me', 'like when']
+
+        for line in lines:
+            line_lower = line.lower()
+
+            # Check for question patterns
+            if any(starter in line_lower for starter in question_starters) and '?' in line:
+                patterns.append("uses clarifying questions")
+
+            # Check for explanation patterns
+            if any(starter in line_lower for starter in explanation_starters):
+                patterns.append("provides clear explanations")
+
+            # Check for humor patterns
+            if any(indicator in line_lower for indicator in humor_indicators):
+                patterns.append("connects topics through humor")
+
+        return list(set(patterns))  # Remove duplicates
+
+    except Exception as e:
+        logger.error(f"Speaking pattern extraction failed: {e}")
+        return []
+
+
+def analyze_character_development(lines: List[str], character: str) -> str:
+    """
+    Provide a brief analysis of character development in this episode.
+    Returns a descriptive string about the character's role and growth.
+    """
+    try:
+        if not lines:
+            return "No dialogue in this episode"
+
+        line_count = len(lines)
+        avg_length = sum(len(line) for line in lines) / line_count
+        question_ratio = sum(1 for line in lines if '?' in line) / line_count
+
+        if character == 'ALEX':
+            if question_ratio > 0.4:
+                return f"Very curious ({line_count} lines, {question_ratio:.1%} questions)"
+            elif question_ratio > 0.2:
+                return f"Moderately inquisitive ({line_count} lines)"
+            else:
+                return f"More declarative than usual ({line_count} lines)"
+
+        elif character == 'SARAH':
+            if avg_length > 100:
+                return f"Detailed explainer ({line_count} lines, {avg_length:.0f} chars avg)"
+            elif avg_length > 50:
+                return f"Balanced educator ({line_count} lines)"
+            else:
+                return f"Concise responses ({line_count} lines)"
+
+        return f"Standard dialogue ({line_count} lines)"
+
+    except Exception as e:
+        logger.error(f"Character development analysis failed: {e}")
+        return "Analysis unavailable"
+
+
+# ============================================================================
+# COMEDY QUALITY RANKING SYSTEM
+# ============================================================================
+
+class ComedyQualityRanker:
+    """
+    Assess and optimize comedy generation quality using weighted metrics.
+    Provides continuous improvement feedback for the comedy system.
+    """
+
+    def __init__(self):
+        self.quality_weights = {
+            'callback_integration': 0.25,    # How naturally callbacks are integrated
+            'persona_consistency': 0.20,     # ALEX/SARAH character consistency
+            'timing_rhythm': 0.20,           # Comedy timing and pacing
+            'chemistry_natural': 0.20,       # Character chemistry and interaction
+            'humor_freshness': 0.15          # Originality and freshness of jokes
+        }
+
+        # Track quality feedback for continuous improvement
+        self.quality_feedback = {}
+
+    def assess_episode_quality(self, job: Job, episode_num: int) -> float:
+        """
+        Comprehensive comedy quality assessment for a single episode.
+        Returns quality score from 0-1 with detailed component analysis.
+        """
+        try:
+            scores = {
+                'callback_integration': self._score_callback_quality(job, episode_num),
+                'persona_consistency': self._score_persona_consistency(job, episode_num),
+                'timing_rhythm': self._score_timing_quality(job, episode_num),
+                'chemistry_natural': self._score_chemistry_naturalness(job, episode_num),
+                'humor_freshness': self._score_humor_originality(job, episode_num)
+            }
+
+            # Calculate weighted overall score
+            weighted_score = sum(scores[metric] * self.quality_weights[metric]
+                               for metric in scores)
+
+            # Store quality feedback for continuous improvement
+            self._store_quality_feedback(job, episode_num, scores, weighted_score)
+
+            logger.info(f"Comedy quality assessment EP{episode_num}: {weighted_score:.3f} "
+                       f"(callback={scores['callback_integration']:.2f}, "
+                       f"persona={scores['persona_consistency']:.2f}, "
+                       f"timing={scores['timing_rhythm']:.2f})")
+
+            return weighted_score
+
+        except Exception as e:
+            logger.error(f"Comedy quality assessment failed for episode {episode_num}: {e}")
+            return 0.7  # Default moderate score
+
+    def _score_callback_quality(self, job: Job, episode_num: int) -> float:
+        """Score callback integration naturalness and timing."""
+        try:
+            if not hasattr(job, 'callback_memory') or not job.callback_memory:
+                return 0.8  # Neutral score for episodes without callbacks
+
+            current_time = time.time()
+            recent_callbacks = [cb for cb in job.callback_memory.values()
+                              if cb.last_used_timestamp > current_time - 1800]  # 30 min window
+
+            if not recent_callbacks:
+                return 0.8  # Neutral score for no recent callbacks
+
+            # Assess callback spacing quality
+            spacing_scores = []
+            for cb in recent_callbacks:
+                time_since_use = current_time - cb.last_used_timestamp
+                optimal_range = 600 <= time_since_use <= 1200  # 10-20 minutes
+                spacing_score = 1.0 if optimal_range else 0.6
+                spacing_scores.append(spacing_score)
+
+            spacing_quality = sum(spacing_scores) / len(spacing_scores)
+
+            # Assess callback integration naturalness (simplified heuristic)
+            integration_quality = 0.8  # Baseline - would need more sophisticated analysis
+
+            return (spacing_quality + integration_quality) / 2
+
+        except Exception as e:
+            logger.error(f"Callback quality scoring failed: {e}")
+            return 0.7
+
+    def _score_persona_consistency(self, job: Job, episode_num: int) -> float:
+        """Score ALEX/SARAH character consistency and development."""
+        try:
+            if not hasattr(job, 'persona_states') or not job.persona_states:
+                return 0.6  # Lower score for missing persona tracking
+
+            alex_state = job.persona_states.get('ALEX')
+            sarah_state = job.persona_states.get('SARAH')
+
+            if not alex_state or not sarah_state:
+                return 0.6
+
+            # Score based on character development consistency
+            alex_growth_count = len(alex_state.episode_growth)
+            sarah_growth_count = len(sarah_state.episode_growth)
+
+            # Characters should develop at similar rates for good consistency
+            growth_balance = 1.0 - abs(alex_growth_count - sarah_growth_count) / max(alex_growth_count + sarah_growth_count, 1)
+
+            # Check if core personality traits are being maintained
+            alex_core_traits = ['curiosity', 'humor_initiator']
+            sarah_core_traits = ['knowledge_sharing', 'humor_delivery']
+
+            trait_consistency = 0.8  # Baseline consistency score
+
+            # Bonus for established personas
+            if alex_growth_count > 0 and sarah_growth_count > 0:
+                trait_consistency += 0.1
+
+            return min((growth_balance + trait_consistency) / 2, 1.0)
+
+        except Exception as e:
+            logger.error(f"Persona consistency scoring failed: {e}")
+            return 0.7
+
+    def _score_timing_quality(self, job: Job, episode_num: int) -> float:
+        """Score comedy timing and rhythm quality."""
+        try:
+            if not hasattr(job, 'timing_markers') or not job.timing_markers:
+                return 0.7  # Neutral score if no timing data
+
+            # Simplified timing assessment - could be enhanced with actual SSML analysis
+            timing_markers = job.timing_markers
+
+            if timing_markers:
+                # Score based on variety and distribution of timing markers
+                marker_types = set(marker.get('type', 'unknown') for marker in timing_markers)
+                variety_score = len(marker_types) / 4.0  # Assuming 4 main types
+
+                # Score based on marker density (not too sparse, not too dense)
+                marker_density = len(timing_markers) / max(len(job.episodes), 1)
+                optimal_density = 0.5 <= marker_density <= 2.0  # 0.5-2 markers per episode
+                density_score = 1.0 if optimal_density else 0.7
+
+                return (variety_score + density_score) / 2
+            else:
+                return 0.6  # Lower score for no timing markers
+
+        except Exception as e:
+            logger.error(f"Timing quality scoring failed: {e}")
+            return 0.7
+
+    def _score_chemistry_naturalness(self, job: Job, episode_num: int) -> float:
+        """Score ALEX/SARAH chemistry and interaction naturalness."""
+        try:
+            if not hasattr(job, 'persona_states') or not job.persona_states:
+                return 0.6
+
+            alex_state = job.persona_states.get('ALEX')
+            sarah_state = job.persona_states.get('SARAH')
+
+            if not alex_state or not sarah_state:
+                return 0.6
+
+            # Use existing chemistry calculation
+            chemistry_score = calculate_chemistry_score(alex_state, sarah_state)
+
+            # Convert from 0-10 scale to 0-1 scale
+            normalized_score = chemistry_score / 10.0
+
+            # Bonus for episode count (chemistry improves over time)
+            episode_bonus = min(len(job.episodes) * 0.05, 0.2)  # Up to 0.2 bonus for 4+ episodes
+
+            return min(normalized_score + episode_bonus, 1.0)
+
+        except Exception as e:
+            logger.error(f"Chemistry naturalness scoring failed: {e}")
+            return 0.7
+
+    def _score_humor_originality(self, job: Job, episode_num: int) -> float:
+        """Score humor freshness and originality."""
+        try:
+            # Simplified originality assessment based on callback variety
+            if not hasattr(job, 'callback_memory') or not job.callback_memory:
+                return 0.8  # Neutral score for new episodes
+
+            callback_types = set(cb.callback_type for cb in job.callback_memory.values())
+            humor_ratings = [cb.humor_rating for cb in job.callback_memory.values()]
+
+            # Score based on variety of callback types
+            type_variety = len(callback_types) / 3.0  # Assuming 3 main types
+
+            # Score based on average humor quality
+            avg_humor_rating = sum(humor_ratings) / len(humor_ratings) if humor_ratings else 5.0
+            humor_quality = avg_humor_rating / 10.0  # Convert to 0-1 scale
+
+            # Penalty for overused callbacks
+            callback_usage_counts = [cb.usage_count for cb in job.callback_memory.values()]
+            avg_usage = sum(callback_usage_counts) / len(callback_usage_counts) if callback_usage_counts else 0
+            overuse_penalty = max(0, avg_usage - 3) * 0.1  # Penalty for >3 uses
+
+            originality_score = (type_variety + humor_quality) / 2 - overuse_penalty
+
+            return max(min(originality_score, 1.0), 0.3)  # Floor at 0.3
+
+        except Exception as e:
+            logger.error(f"Humor originality scoring failed: {e}")
+            return 0.7
+
+    def _store_quality_feedback(self, job: Job, episode_num: int, scores: dict, overall_score: float):
+        """Store quality feedback for continuous improvement analysis."""
+        try:
+            job_id = job.id
+            if job_id not in self.quality_feedback:
+                self.quality_feedback[job_id] = []
+
+            feedback_entry = {
+                'episode_num': episode_num,
+                'timestamp': time.time(),
+                'scores': scores.copy(),
+                'overall_score': overall_score,
+                'episode_count': len(job.episodes),
+                'callback_count': len(job.callback_memory) if hasattr(job, 'callback_memory') else 0
+            }
+
+            self.quality_feedback[job_id].append(feedback_entry)
+
+            # Keep only recent feedback (last 10 episodes per job)
+            self.quality_feedback[job_id] = self.quality_feedback[job_id][-10:]
+
+        except Exception as e:
+            logger.error(f"Quality feedback storage failed: {e}")
+
+    def provide_improvement_recommendations(self, job: Job) -> List[str]:
+        """Generate specific recommendations for comedy improvement based on quality analysis."""
+        try:
+            recommendations = []
+
+            if not hasattr(job, 'comedy_metrics') or len(job.comedy_metrics) < 2:
+                recommendations.append("Continue creating episodes to build comedy metrics baseline")
+                return recommendations
+
+            # Analyze recent comedy metrics
+            recent_metrics = job.comedy_metrics[-3:] if len(job.comedy_metrics) >= 3 else job.comedy_metrics
+
+            # Calculate averages
+            avg_callback_density = sum(m.callback_density for m in recent_metrics) / len(recent_metrics)
+            avg_timing_score = sum(m.timing_score for m in recent_metrics) / len(recent_metrics)
+            avg_chemistry = sum(m.chemistry_rating for m in recent_metrics) / len(recent_metrics)
+            avg_laugh_prediction = sum(m.laugh_prediction for m in recent_metrics) / len(recent_metrics)
+            avg_turn_taking = sum(m.turn_taking_quality for m in recent_metrics) / len(recent_metrics)
+
+            # Generate specific recommendations based on thresholds
+            if avg_callback_density < 0.3:
+                recommendations.append("Increase callback frequency - aim for 1-2 callbacks per episode for better running gags")
+
+            if avg_timing_score < 0.7:
+                recommendations.append("Improve comedy timing - add more pause markers and rhythm variation between setup and punchline")
+
+            if avg_chemistry < 0.75:
+                recommendations.append("Enhance character chemistry - encourage more natural interruptions and back-and-forth reactions")
+
+            if avg_laugh_prediction < 0.6:
+                recommendations.append("Focus on higher-quality humor - aim for more observational comedy and stronger punchlines")
+
+            if avg_turn_taking < 0.6:
+                recommendations.append("Improve dialogue flow - ensure more balanced speaking turns between ALEX and SARAH")
+
+            # Check for improvement trends
+            if len(recent_metrics) >= 3:
+                trend_chemistry = recent_metrics[-1].chemistry_rating - recent_metrics[0].chemistry_rating
+                if trend_chemistry < -0.1:
+                    recommendations.append("Character chemistry is declining - review persona consistency and interaction patterns")
+
+            if not recommendations:
+                recommendations.append("Comedy quality metrics look good! Continue current approach for consistent quality")
+
+            return recommendations
+
+        except Exception as e:
+            logger.error(f"Improvement recommendations generation failed: {e}")
+            return ["Quality analysis temporarily unavailable - continue creating great comedy content!"]
+
+    def get_quality_summary(self, job: Job) -> Dict[str, Any]:
+        """Get comprehensive quality summary for dashboard display."""
+        try:
+            if not hasattr(job, 'comedy_metrics') or not job.comedy_metrics:
+                return {'status': 'insufficient_data', 'message': 'Not enough episodes for quality analysis'}
+
+            recent_metrics = job.comedy_metrics[-1] if job.comedy_metrics else None
+            if not recent_metrics:
+                return {'status': 'no_recent_data'}
+
+            # Calculate overall quality score
+            quality_scores = {
+                'callback_density': recent_metrics.callback_density,
+                'timing_score': recent_metrics.timing_score,
+                'chemistry_rating': recent_metrics.chemistry_rating,
+                'laugh_prediction': recent_metrics.laugh_prediction,
+                'turn_taking_quality': recent_metrics.turn_taking_quality
+            }
+
+            overall_quality = sum(quality_scores.values()) / len(quality_scores)
+
+            return {
+                'status': 'available',
+                'overall_quality': overall_quality,
+                'component_scores': quality_scores,
+                'recommendations': self.provide_improvement_recommendations(job),
+                'episode_count': len(job.comedy_metrics),
+                'latest_episode': recent_metrics.episode_id
+            }
+
+        except Exception as e:
+            logger.error(f"Quality summary generation failed: {e}")
+            return {'status': 'error', 'message': 'Quality analysis temporarily unavailable'}
+
+
+# Global comedy quality ranker instance
+comedy_quality_ranker = ComedyQualityRanker()
+
+
+# ============================================================================
+# SSML TIMING LAYER FOR COMEDY PROSODIC CONTROL
+# ============================================================================
+
+def add_comedy_timing_markers(text: str, job: Job) -> str:
+    """
+    Add SSML timing markers for comedy rhythm and prosodic control.
+    Enhances TTS output with comedy-specific pause timing and emphasis.
+    """
+    try:
+        if not hasattr(job, 'comedy_mode') or not job.comedy_mode:
+            return text  # No timing modifications for non-comedy content
+
+        # Identify comedy timing opportunities
+        timing_opportunities = identify_timing_points(text)
+
+        if not timing_opportunities:
+            logger.info("No comedy timing opportunities identified")
+            return text
+
+        enhanced_text = text
+        timing_markers_added = []
+
+        for timing_point in timing_opportunities:
+            original_location = timing_point['location']
+            timing_type = timing_point['type']
+
+            # Apply different SSML markers based on timing type
+            if timing_type == 'pause_for_laugh':
+                # Add pause after punchline for audience laugh response
+                replacement = f"{original_location}<break time='2.0s'/>"
+                enhanced_text = enhanced_text.replace(original_location, replacement, 1)
+                timing_markers_added.append({'type': 'pause_for_laugh', 'duration': '2.0s'})
+
+            elif timing_type == 'build_up':
+                # Slow down build-up lines for dramatic effect
+                replacement = f"<prosody rate='85%'>{original_location}</prosody>"
+                enhanced_text = enhanced_text.replace(original_location, replacement, 1)
+                timing_markers_added.append({'type': 'build_up', 'rate': '85%'})
+
+            elif timing_type == 'punchline_emphasis':
+                # Emphasize punchlines with pitch and rate changes
+                replacement = f"<prosody pitch='+15%' rate='90%'>{original_location}</prosody>"
+                enhanced_text = enhanced_text.replace(original_location, replacement, 1)
+                timing_markers_added.append({'type': 'punchline_emphasis', 'pitch': '+15%', 'rate': '90%'})
+
+            elif timing_type == 'callback_reference':
+                # Slightly slower pace for callback references to emphasize connection
+                replacement = f"<prosody rate='88%'>{original_location}</prosody>"
+                enhanced_text = enhanced_text.replace(original_location, replacement, 1)
+                timing_markers_added.append({'type': 'callback_reference', 'rate': '88%'})
+
+            elif timing_type == 'setup_pause':
+                # Brief pause after setup before punchline
+                replacement = f"{original_location}<break time='0.8s'/>"
+                enhanced_text = enhanced_text.replace(original_location, replacement, 1)
+                timing_markers_added.append({'type': 'setup_pause', 'duration': '0.8s'})
+
+        # Store timing markers in job for quality assessment
+        if hasattr(job, 'timing_markers'):
+            job.timing_markers.extend(timing_markers_added)
+        else:
+            job.timing_markers = timing_markers_added
+
+        logger.info(f"Comedy timing: Added {len(timing_markers_added)} SSML markers "
+                   f"({len([m for m in timing_markers_added if m['type'] == 'pause_for_laugh'])} laugh pauses, "
+                   f"{len([m for m in timing_markers_added if m['type'] == 'punchline_emphasis'])} punchline emphasis)")
+
+        return enhanced_text
+
+    except Exception as e:
+        logger.error(f"Comedy timing marker addition failed: {e}")
+        return text  # Return original text if timing fails
+
+
+def identify_timing_points(text: str) -> List[Dict]:
+    """
+    Identify where comedy timing should be applied using pattern recognition.
+    Returns list of timing opportunities with locations and types.
+    """
+    try:
+        timing_opportunities = []
+        lines = text.split('\n')
+
+        # Comedy timing patterns
+        punchline_indicators = ['!', '?!', 'really?', 'seriously?', 'no way!', 'exactly!']
+        setup_indicators = ['so', 'but then', 'and then', 'you know what', 'the thing is']
+        callback_indicators = ['remember when', 'like we said', 'as we mentioned', 'that reminds me']
+        build_up_indicators = ['it\'s like', 'imagine if', 'picture this', 'you have to understand']
+
+        for i, line in enumerate(lines):
+            line_stripped = line.strip()
+            if not line_stripped or not (':' in line_stripped):
+                continue
+
+            # Extract the dialogue content (after speaker name)
+            if ':' in line_stripped:
+                speaker, dialogue = line_stripped.split(':', 1)
+                dialogue = dialogue.strip()
+
+                if not dialogue:
+                    continue
+
+                # Check for punchline indicators
+                for indicator in punchline_indicators:
+                    if indicator in dialogue.lower():
+                        timing_opportunities.append({
+                            'location': dialogue,
+                            'type': 'punchline_emphasis',
+                            'confidence': 0.8,
+                            'line_num': i
+                        })
+
+                        # Add pause after punchline if it ends the sentence
+                        if dialogue.endswith(('!', '?', '.')):
+                            timing_opportunities.append({
+                                'location': dialogue,
+                                'type': 'pause_for_laugh',
+                                'confidence': 0.9,
+                                'line_num': i
+                            })
+                        break
+
+                # Check for setup patterns that need pause before punchline
+                for indicator in setup_indicators:
+                    if indicator in dialogue.lower() and i < len(lines) - 1:
+                        # Check if next line might be a punchline
+                        next_line = lines[i + 1].strip()
+                        if next_line and any(punct in next_line for punct in ['!', '?']):
+                            timing_opportunities.append({
+                                'location': dialogue,
+                                'type': 'setup_pause',
+                                'confidence': 0.7,
+                                'line_num': i
+                            })
+                        break
+
+                # Check for callback references
+                for indicator in callback_indicators:
+                    if indicator in dialogue.lower():
+                        timing_opportunities.append({
+                            'location': dialogue,
+                            'type': 'callback_reference',
+                            'confidence': 0.8,
+                            'line_num': i
+                        })
+                        break
+
+                # Check for build-up patterns
+                for indicator in build_up_indicators:
+                    if indicator in dialogue.lower():
+                        timing_opportunities.append({
+                            'location': dialogue,
+                            'type': 'build_up',
+                            'confidence': 0.7,
+                            'line_num': i
+                        })
+                        break
+
+        # Filter out low-confidence opportunities and remove duplicates
+        filtered_opportunities = []
+        seen_locations = set()
+
+        for opp in timing_opportunities:
+            if opp['confidence'] >= 0.7 and opp['location'] not in seen_locations:
+                filtered_opportunities.append(opp)
+                seen_locations.add(opp['location'])
+
+        logger.info(f"Comedy timing analysis: {len(filtered_opportunities)} timing points identified "
+                   f"from {len(lines)} lines of dialogue")
+
+        return filtered_opportunities
+
+    except Exception as e:
+        logger.error(f"Comedy timing analysis failed: {e}")
+        return []
+
+
+def identify_timing_points_with_claude(text: str) -> List[Dict]:
+    """
+    Advanced timing analysis using Claude for more sophisticated comedy timing.
+    Fallback method for complex timing identification.
+    """
+    try:
+        if not CLAUDE_API_KEY:
+            logger.warning("Claude API not available for advanced timing analysis")
+            return []
+
+        timing_prompt = f"""Analyze this comedy dialogue for timing opportunities. Identify specific lines that need special prosodic treatment for comedy timing:
+
+DIALOGUE:
+{text}
+
+IDENTIFY TIMING OPPORTUNITIES:
+1. Lines that need pause after for laugh response (punchlines, funny reactions)
+2. Build-up lines that should be slower for dramatic effect
+3. Punchlines that need emphasis (pitch/rate changes)
+4. Natural interruption points for rhythm
+
+For each opportunity, provide:
+- The exact line text
+- Timing type: "pause_for_laugh", "build_up", "punchline_emphasis", "setup_pause"
+- Confidence score (0.5-1.0)
+- Brief reason for the timing
+
+Return as JSON:
+[{{"line": "exact text", "type": "pause_for_laugh", "confidence": 0.9, "reason": "punchline ending"}}]"""
+
+        response = anthropic.Anthropic(api_key=CLAUDE_API_KEY).messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=2000,
+            messages=[{
+                "role": "user",
+                "content": timing_prompt
+            }]
+        )
+
+        result_text = response.content[0].text.strip()
+
+        # Parse JSON response
+        import json
+        try:
+            timing_candidates = json.loads(result_text)
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse timing analysis JSON from Claude")
+            return []
+
+        # Convert to timing opportunities format
+        opportunities = []
+        for candidate in timing_candidates:
+            if candidate.get('confidence', 0) >= 0.6:  # Only high-confidence timing
+                opportunities.append({
+                    'location': candidate['line'],
+                    'type': candidate['type'],
+                    'confidence': candidate.get('confidence', 0.7),
+                    'reason': candidate.get('reason', 'AI-identified timing')
+                })
+
+        logger.info(f"Claude timing analysis: {len(opportunities)} advanced timing opportunities identified")
+        return opportunities
+
+    except Exception as e:
+        logger.error(f"Claude timing analysis failed: {e}")
+        return []
+
+
+def apply_comedy_timing_to_chunks(chunks: List[tuple], job: Job) -> List[tuple]:
+    """
+    Apply comedy timing to TTS chunks before generation.
+    Integrates SSML timing markers into chunk processing pipeline.
+    """
+    try:
+        if not hasattr(job, 'comedy_mode') or not job.comedy_mode:
+            return chunks  # No timing modifications for non-comedy
+
+        enhanced_chunks = []
+
+        for i, (chunk_text, voice, speaker) in enumerate(chunks):
+            # Create a mini job context for timing analysis
+            enhanced_text = add_comedy_timing_markers(chunk_text, job)
+
+            enhanced_chunks.append((enhanced_text, voice, speaker))
+
+        total_timing_markers = len(job.timing_markers) if hasattr(job, 'timing_markers') else 0
+        logger.info(f"Comedy timing applied to {len(chunks)} chunks, {total_timing_markers} total timing markers")
+
+        return enhanced_chunks
+
+    except Exception as e:
+        logger.error(f"Comedy timing application to chunks failed: {e}")
+        return chunks  # Return original chunks if timing fails
 
 
 if __name__ == '__main__':

@@ -13,3 +13,11 @@ requests>=2.31.0
 flask-limiter>=3.5.0       # Rate limiting for endpoints
 tenacity>=8.2.0            # Retry logic with exponential backoff
 apscheduler>=3.10.0        # Background job scheduling (cleanup)
+
+# Performance monitoring and analytics
+numpy>=1.24.0              # Numerical computing for performance metrics
+scikit-learn>=1.3.0        # Machine learning for optimization recommendations
+
+# Comedy system dependencies
+python-dateutil>=2.8.0     # Date/time handling for callback timing
+regex>=2023.8.8            # Enhanced pattern matching for comedy analysis
