@@ -802,9 +802,26 @@ def get_client():
 
 def preprocess_text(text):
     """
-    Clean text for natural TTS reading.
+    Clean text for natural TTS reading while preserving SSML timing elements.
     Handles technical content, code blocks, tables, and symbols.
     """
+    # NEW: Store SSML timing elements temporarily to preserve during cleaning
+    ssml_elements = []
+    ssml_patterns = [
+        (r'<break\s+time=["\'][^"\']+["\'][^>]*/?>', 'BREAK'),
+        (r'<prosody[^>]*>.*?</prosody>', 'PROSODY'),
+        (r'<prosody[^>]*/?>', 'PROSODY_SINGLE')
+    ]
+
+    # Extract and temporarily replace SSML elements
+    for pattern, element_type in ssml_patterns:
+        matches = list(re.finditer(pattern, text, re.IGNORECASE))
+        for match in matches:
+            # Use placeholder pattern that won't be affected by preprocessing
+            placeholder = f"{{{{SSMLPRESERVE{element_type}{len(ssml_elements)}}}}}"
+            ssml_elements.append((placeholder, match.group()))
+            text = text.replace(match.group(), placeholder, 1)  # Replace only first occurrence
+
     # 1. Remove code blocks entirely (or describe them)
     text = re.sub(r'```[\s\S]*?```', ' [code example omitted] ', text)
     text = re.sub(r'`([^`]+)`', r'\1', text)  # Remove backticks but keep content
@@ -881,6 +898,14 @@ def preprocess_text(text):
     # 11. Clean up whitespace
     text = re.sub(r'\n{3,}', '\n\n', text)
     text = re.sub(r'  +', ' ', text)
+
+    # NEW: Restore SSML timing elements that were temporarily removed
+    for placeholder, ssml_element in ssml_elements:
+        text = text.replace(placeholder, ssml_element)
+
+    # Log SSML preservation for debugging
+    if ssml_elements:
+        logger.info(f"Text preprocessing: Preserved {len(ssml_elements)} SSML timing elements")
 
     return text.strip()
 
@@ -4305,14 +4330,31 @@ def run_stage_generate(job: Job) -> StageResult:
     job_dir = TEMP_DIR / job_id
     job_dir.mkdir(exist_ok=True)
 
-    # Preprocess text
+    # NEW: Script timing parser integration for pre-written scripts
+    has_script_timing = script_timing_parser.detect_script_mode(text)
+
+    if has_script_timing:
+        logger.info("🎬 Script timing markers detected - converting to SSML")
+        # Convert script markers BEFORE preprocessing
+        text = script_timing_parser.convert_script_timing_to_ssml(text)
+        logger.info(f"Script timing converted: [beat] → <break time='0.8s'/>, [pause] → <break time='1.2s'/>, [long pause] → <break time='2.0s'/>")
+
+    # Preprocess text (now preserves SSML timing elements)
     processed = preprocess_text(text)
 
-    # Apply comedy timing layer if comedy mode is enabled
-    if getattr(job, 'comedy_mode', False):
-        logger.info("🎭 Applying comedy timing layer with SSML markers")
+    # Apply comedy timing layer if enabled (but NOT when script timing is already present)
+    if getattr(job, 'comedy_mode', False) and not has_script_timing:
+        logger.info("🎭 Applying automated comedy timing layer with SSML markers")
         processed = add_comedy_timing_markers(processed, job)
         logger.info(f"Comedy timing applied: {processed.count('<break')} breaks, {processed.count('<prosody')} prosody markers")
+    elif has_script_timing:
+        logger.info("🎬 Using manual script timing markers (skipping automated comedy timing)")
+
+    # Log final timing marker count for verification
+    break_count = processed.count('<break')
+    prosody_count = processed.count('<prosody')
+    if break_count > 0 or prosody_count > 0:
+        logger.info(f"Final SSML timing elements: {break_count} break tags, {prosody_count} prosody tags")
 
     # Split into chunks
     if job.multi_voice:
@@ -5645,6 +5687,84 @@ def analyze_character_development(lines: List[str], character: str) -> str:
     except Exception as e:
         logger.error(f"Character development analysis failed: {e}")
         return "Analysis unavailable"
+
+
+# ============================================================================
+# SCRIPT TIMING PARSER FOR PRE-WRITTEN SCRIPTS
+# ============================================================================
+
+class ScriptTimingParser:
+    """
+    Parse and convert script timing markers to SSML for audio production.
+    Handles pre-written scripts with [beat], [pause], [long pause], [SFX:] markers.
+    """
+
+    def __init__(self):
+        self.timing_patterns = {
+            r'\[beat\]': '<break time="0.8s"/>',
+            r'\[pause\]': '<break time="1.2s"/>',
+            r'\[long pause\]': '<break time="2.0s"/>',
+            # SFX markers handled separately for AI sound generation
+            r'\[.*?\]': ''  # Remove any other bracket annotations (except SFX)
+        }
+
+        self.sfx_pattern = r'\[SFX:\s*([^\]]+)\]'  # Capture sound effect descriptions
+
+    def convert_script_timing_to_ssml(self, text: str) -> str:
+        """Convert script timing markers to SSML break elements"""
+        converted_text = text
+
+        # First, extract and temporarily remove SFX markers to handle separately
+        sfx_markers = []
+        for match in re.finditer(self.sfx_pattern, text, re.IGNORECASE):
+            placeholder = f"__SFX_PLACEHOLDER_{len(sfx_markers)}__"
+            sfx_markers.append((placeholder, match.group(0), match.group(1).strip()))
+            converted_text = converted_text.replace(match.group(0), placeholder)
+
+        # Convert timing patterns
+        for pattern, replacement in self.timing_patterns.items():
+            if pattern != r'\[.*?\]':  # Don't process the catch-all pattern yet
+                converted_text = re.sub(pattern, replacement, converted_text, flags=re.IGNORECASE)
+
+        # Apply catch-all pattern to remove remaining brackets (except our placeholders)
+        converted_text = re.sub(r'\[(?!SFX_PLACEHOLDER)[^\]]*\]', '', converted_text, flags=re.IGNORECASE)
+
+        # Handle SFX markers - for now, remove them (sound effects to be implemented later)
+        for placeholder, original_marker, description in sfx_markers:
+            # TODO: Implement AI sound effect generation
+            # For now: remove SFX markers entirely
+            converted_text = converted_text.replace(placeholder, '')
+            logger.info(f"🎵 SFX marker detected: '{description}' (placeholder for future AI generation)")
+
+        return converted_text
+
+    def detect_script_mode(self, text: str) -> bool:
+        """Detect if input contains script timing markers"""
+        script_markers = [r'\[beat\]', r'\[pause\]', r'\[long pause\]', r'\[SFX:']
+        return any(re.search(pattern, text, re.IGNORECASE) for pattern in script_markers)
+
+    def extract_sound_effects(self, text: str) -> List[Dict]:
+        """Extract sound effect descriptions for AI generation"""
+        sound_effects = []
+        for match in re.finditer(self.sfx_pattern, text, re.IGNORECASE):
+            description = match.group(1).strip()
+            sound_effects.append({
+                'original_marker': match.group(0),
+                'description': description,
+                'position': match.start()
+            })
+        return sound_effects
+
+    def generate_sound_effect(self, description: str) -> str:
+        """Generate sound effect audio using AI (placeholder for implementation)"""
+        # TODO: Integration with AI audio generation service
+        # For now: return placeholder or silence
+        logger.info(f"🔊 Sound effect requested: '{description}' (AI generation not yet implemented)")
+        return f"__SOUND_EFFECT_{description.replace(' ', '_')}__"
+
+
+# Initialize global script timing parser
+script_timing_parser = ScriptTimingParser()
 
 
 # ============================================================================
