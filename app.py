@@ -3316,6 +3316,102 @@ def verify_topic_coverage(final_text: str, topics: list) -> dict:
     }
 
 
+def verify_balanced_topic_coverage(final_text: str, topic_allocation: Dict[int, List[str]]) -> dict:
+    """
+    Verify each topic receives proportional coverage based on allocation.
+    Enhanced coverage analysis for balanced topic distribution.
+
+    Args:
+        final_text: Generated podcast text
+        topic_allocation: Dict mapping episode_num to assigned topics
+
+    Returns:
+        Dict with topic balance analysis and word count distribution
+    """
+    if not topic_allocation:
+        return {
+            'topic_word_counts': {},
+            'balance_score': 1.0,
+            'underrepresented_topics': [],
+            'allocation_success': True
+        }
+
+    # Flatten all allocated topics
+    all_allocated_topics = []
+    for topics_list in topic_allocation.values():
+        all_allocated_topics.extend(topics_list)
+
+    if not all_allocated_topics:
+        return {
+            'topic_word_counts': {},
+            'balance_score': 1.0,
+            'underrepresented_topics': [],
+            'allocation_success': True
+        }
+
+    # Count words for each topic in final text
+    final_lower = final_text.lower()
+    topic_word_counts = {}
+
+    for topic in all_allocated_topics:
+        # Extract significant keywords from topic (4+ chars)
+        topic_words = set(re.findall(r'\b\w{4,}\b', topic.lower()))
+
+        if topic_words:
+            # Count approximate word coverage for this topic
+            # This is a heuristic: count sentences that contain topic keywords
+            sentences = re.split(r'[.!?]+', final_text)
+            topic_word_count = 0
+
+            for sentence in sentences:
+                sentence_lower = sentence.lower()
+                # If sentence contains topic keywords, count all words in that sentence
+                if any(word in sentence_lower for word in topic_words):
+                    topic_word_count += len(sentence.split())
+
+            topic_word_counts[topic] = topic_word_count
+        else:
+            topic_word_counts[topic] = 0
+
+    # Calculate balance metrics
+    word_counts = list(topic_word_counts.values())
+    if not word_counts or all(count == 0 for count in word_counts):
+        return {
+            'topic_word_counts': topic_word_counts,
+            'balance_score': 0.0,
+            'underrepresented_topics': all_allocated_topics,
+            'allocation_success': False
+        }
+
+    avg_word_count = sum(word_counts) / len(word_counts)
+    min_expected_words = avg_word_count * 0.5  # Topics should have at least 50% of average
+
+    # Identify underrepresented topics
+    underrepresented_topics = [
+        topic for topic, word_count in topic_word_counts.items()
+        if word_count < min_expected_words and word_count < 100  # Less than 100 words is concerning
+    ]
+
+    # Calculate balance score (1.0 = perfectly balanced, lower = more variance)
+    if len(set(word_counts)) == 1:  # All counts are identical
+        balance_score = 1.0
+    else:
+        variance = sum((count - avg_word_count) ** 2 for count in word_counts) / len(word_counts)
+        coefficient_of_variation = (variance ** 0.5) / avg_word_count if avg_word_count > 0 else 1.0
+        balance_score = max(0.0, 1.0 - coefficient_of_variation)  # Lower CV = higher balance score
+
+    allocation_success = len(underrepresented_topics) == 0
+
+    return {
+        'topic_word_counts': topic_word_counts,
+        'balance_score': round(balance_score, 3),
+        'underrepresented_topics': underrepresented_topics,
+        'allocation_success': allocation_success,
+        'avg_words_per_topic': round(avg_word_count, 1),
+        'word_count_variance': round(variance, 1) if 'variance' in locals() else 0.0
+    }
+
+
 def analyze_content_complexity(text: str, detected_topics: List[str]) -> dict:
     """
     Analyze input content to determine appropriate length and depth for COMPREHENSIVE mode.
@@ -4029,6 +4125,174 @@ def run_stage_expand(job: Job) -> StageResult:
     )
 
 
+class TopicAllocator:
+    """
+    Distribute topics fairly across episodes based on complexity and importance.
+    Eliminates bias toward early topics by using balanced allocation algorithms.
+    """
+
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+
+    def allocate_topics_to_episodes(self, topics: List[str], episodes: List[dict],
+                                  metadata: List['NewsTopicMetadata']) -> Dict[int, List[str]]:
+        """
+        Distribute topics across episodes using round-robin + complexity balancing.
+
+        Args:
+            topics: List of topic strings (e.g., ["1. Topic A", "2. Topic B"])
+            episodes: List of episode dicts with episode_num
+            metadata: List of NewsTopicMetadata for topic complexity scoring
+
+        Returns:
+            Dict mapping episode_num to list of assigned topics
+        """
+        if not topics or not episodes:
+            return {}
+
+        num_episodes = len(episodes)
+        episode_nums = [ep['episode_num'] for ep in episodes]
+
+        # Calculate topic complexity scores
+        complexity_scores = {}
+        for i, topic in enumerate(topics):
+            topic_meta = metadata[i] if i < len(metadata) else None
+            complexity_scores[topic] = self.calculate_topic_complexity(topic, topic_meta)
+
+        # Sort topics by complexity (distribute high-complexity topics first)
+        sorted_topics = sorted(topics, key=lambda t: complexity_scores[t], reverse=True)
+
+        # Round-robin allocation starting with most complex topics
+        allocation = {ep_num: [] for ep_num in episode_nums}
+
+        for i, topic in enumerate(sorted_topics):
+            target_episode = episode_nums[i % num_episodes]
+            allocation[target_episode].append(topic)
+
+        # Balance workload if needed
+        balanced_allocation = self.balance_episode_workload(allocation, complexity_scores)
+
+        self.logger.info(f"Topic allocation completed: {num_episodes} episodes, {len(topics)} topics")
+        for ep_num, ep_topics in balanced_allocation.items():
+            avg_complexity = sum(complexity_scores[t] for t in ep_topics) / len(ep_topics) if ep_topics else 0
+            self.logger.info(f"  Episode {ep_num}: {len(ep_topics)} topics (avg complexity: {avg_complexity:.2f})")
+
+        return balanced_allocation
+
+    def calculate_topic_complexity(self, topic: str, metadata: 'NewsTopicMetadata' = None) -> float:
+        """
+        Score topic complexity based on sources, length, recency.
+
+        Returns:
+            Float between 1.0 (simple) and 5.0 (complex)
+        """
+        complexity = 1.0  # Base complexity
+
+        if metadata:
+            # Source count factor (more sources = more complex)
+            if metadata.sources_count:
+                source_factor = min(2.0, metadata.sources_count / 5.0)  # Cap at 2.0
+                complexity += source_factor
+
+            # Summary length factor (longer summary = more complex content)
+            if metadata.summary:
+                summary_length = len(metadata.summary.split())
+                length_factor = min(1.5, summary_length / 100.0)  # Cap at 1.5
+                complexity += length_factor
+
+            # Recency factor (very recent news may be more complex)
+            if metadata.published:
+                # Simple heuristic: recent = potentially more complex
+                complexity += 0.5
+        else:
+            # Fallback complexity scoring based on topic text
+            topic_length = len(topic.split())
+            if topic_length > 10:
+                complexity += 1.0
+            if any(indicator in topic.lower() for indicator in ['analysis', 'study', 'research', 'data']):
+                complexity += 1.0
+
+        return min(5.0, complexity)  # Cap at 5.0
+
+    def balance_episode_workload(self, allocation: Dict[int, List[str]],
+                               complexity_scores: Dict[str, float]) -> Dict[int, List[str]]:
+        """
+        Ensure no episode gets >40% high-complexity topics.
+        Redistributes topics if workload is unbalanced.
+
+        Args:
+            allocation: Current topic allocation
+            complexity_scores: Topic complexity ratings
+
+        Returns:
+            Balanced allocation dict
+        """
+        if not allocation:
+            return allocation
+
+        # Calculate average complexity per episode
+        episode_complexities = {}
+        for ep_num, topics in allocation.items():
+            if topics:
+                avg_complexity = sum(complexity_scores[topic] for topic in topics) / len(topics)
+                episode_complexities[ep_num] = avg_complexity
+            else:
+                episode_complexities[ep_num] = 0
+
+        overall_avg = sum(episode_complexities.values()) / len(episode_complexities)
+        threshold = overall_avg * 1.4  # 40% above average = unbalanced
+
+        # Identify overloaded episodes
+        overloaded = [(ep_num, complexity) for ep_num, complexity in episode_complexities.items()
+                     if complexity > threshold]
+        underloaded = [(ep_num, complexity) for ep_num, complexity in episode_complexities.items()
+                      if complexity < overall_avg * 0.8]
+
+        # Redistribute if needed
+        if overloaded and underloaded:
+            self.logger.info(f"Rebalancing workload: {len(overloaded)} overloaded episodes detected")
+
+            for overloaded_ep, _ in overloaded:
+                for underloaded_ep, _ in underloaded:
+                    # Move one complex topic from overloaded to underloaded
+                    overloaded_topics = allocation[overloaded_ep]
+                    if overloaded_topics:
+                        # Find most complex topic in overloaded episode
+                        complex_topic = max(overloaded_topics, key=lambda t: complexity_scores[t])
+                        if complexity_scores[complex_topic] > 3.0:  # Only move genuinely complex topics
+                            allocation[overloaded_ep].remove(complex_topic)
+                            allocation[underloaded_ep].append(complex_topic)
+                            break
+
+        return allocation
+
+    def get_allocation_summary(self, allocation: Dict[int, List[str]],
+                             complexity_scores: Dict[str, float]) -> Dict[str, any]:
+        """
+        Generate summary statistics for topic allocation.
+
+        Returns:
+            Dict with balance metrics and allocation summary
+        """
+        if not allocation:
+            return {'balance_score': 1.0, 'total_topics': 0, 'episodes': 0}
+
+        topic_counts = [len(topics) for topics in allocation.values()]
+        avg_topics_per_episode = sum(topic_counts) / len(topic_counts)
+
+        # Calculate balance score (1.0 = perfectly balanced, lower = more unbalanced)
+        variance = sum((count - avg_topics_per_episode) ** 2 for count in topic_counts) / len(topic_counts)
+        balance_score = max(0.0, 1.0 - (variance / avg_topics_per_episode)) if avg_topics_per_episode > 0 else 1.0
+
+        return {
+            'balance_score': round(balance_score, 3),
+            'total_topics': sum(topic_counts),
+            'episodes': len(allocation),
+            'avg_topics_per_episode': round(avg_topics_per_episode, 1),
+            'topic_distribution': {ep_num: len(topics) for ep_num, topics in allocation.items()}
+        }
+
+
 def run_stage_enhance(job: Job) -> StageResult:
     """Enhancement stage - Claude polishes AND EXPANDS dialogue to meet length targets"""
     text = job.final_text if job.final_text else job.text
@@ -4089,17 +4353,33 @@ def run_stage_enhance(job: Job) -> StageResult:
     all_changes = []
     enhanced_map = {}
 
-    # Get detected topics for mandatory coverage
+    # Get detected topics for balanced allocation
     if job.detected_topics:
         all_topics = job.detected_topics
+        # Get metadata for topic complexity scoring
+        _, topic_metadata = detect_topics(text) if hasattr(job, 'topic_metadata') and job.topic_metadata else ([], [])
     else:
-        all_topics, _ = detect_topics(text)  # Extract topics, ignore metadata in fallback
-    topic_list = "\n".join(f"   - {t[:80]}" for t in all_topics)
+        all_topics, topic_metadata = detect_topics(text)
+
+    # NEW: BALANCED TOPIC ALLOCATION - Eliminate bias toward early topics
+    topic_allocator = TopicAllocator()
+    topic_allocation = topic_allocator.allocate_topics_to_episodes(all_topics, episodes, topic_metadata)
+
+    # Store allocation on job for verification and debugging
+    if not hasattr(job, 'topic_allocation'):
+        job.topic_allocation = topic_allocation
+
+    # Get allocation summary for monitoring
+    allocation_summary = topic_allocator.get_allocation_summary(topic_allocation,
+                                                                {topic: topic_allocator.calculate_topic_complexity(topic,
+                                                                 topic_metadata[i] if i < len(topic_metadata) else None)
+                                                                 for i, topic in enumerate(all_topics)})
 
     # ENTERPRISE AGENT ALLOCATION: Dynamic scaling with Render safety limits
     agent_count = min(len(episodes), SAFE_ENHANCE_AGENTS)  # Safe mode: max 2 agents on Render
 
     logger.info(f"Enterprise ENHANCE: Processing {len(episodes)} episodes with {agent_count} parallel Claude agents")
+    logger.info(f"Topic Allocation: {allocation_summary['total_topics']} topics, balance score: {allocation_summary['balance_score']:.3f}")
 
     # Prepare enhancement tasks for parallel processing
     enhancement_tasks = []
@@ -4108,17 +4388,31 @@ def run_stage_enhance(job: Job) -> StageResult:
         research = research_map.get(ep_num, '')
         ep_word_count = len(ep['text'].split())
 
-        # Build MANDATORY TOPIC COVERAGE + expansion instructions
-        mandatory_coverage = f"""
-=== MANDATORY COMPLETE COVERAGE - READ FIRST ===
-You MUST cover ALL {len(all_topics)} of the following topics in the dialogue.
-DO NOT SKIP ANY TOPIC. EVERY topic below MUST appear in your output:
+        # NEW: Get allocated topics for THIS episode only (eliminates bias)
+        allocated_topics = topic_allocation.get(ep_num, [])
+        allocated_topic_list = "\n".join(f"   - {t[:80]}" for t in allocated_topics)
 
-{topic_list}
+        # Build FOCUSED TOPIC COVERAGE for allocated topics only
+        if allocated_topics:
+            mandatory_coverage = f"""
+=== FOCUSED TOPIC COVERAGE - READ FIRST ===
+This episode is responsible for covering {len(allocated_topics)} specific topics in detail.
+You MUST provide comprehensive coverage of THESE ASSIGNED TOPICS ONLY:
 
-FAILURE TO COVER ANY TOPIC IS UNACCEPTABLE.
-After writing, verify EACH topic above has corresponding dialogue content.
-=== END MANDATORY COVERAGE ===
+{allocated_topic_list}
+
+Focus deeply on these {len(allocated_topics)} topics with thorough explanations, examples, and educational content.
+DO NOT attempt to cover other topics - other episodes will handle them.
+After writing, verify EACH assigned topic above has substantial dialogue content.
+=== END FOCUSED COVERAGE ===
+"""
+        else:
+            # Fallback for episodes with no allocated topics (shouldn't happen with proper allocation)
+            mandatory_coverage = f"""
+=== EPISODE CONTENT ENHANCEMENT ===
+Enhance the existing content with educational explanations and natural dialogue flow.
+Focus on making the content engaging and informative.
+=== END ENHANCEMENT ===
 """
         if is_comprehensive_mode:
             # COMPREHENSIVE mode - no word limits, content-driven expansion
@@ -4253,21 +4547,59 @@ Remember: ALL topics listed above MUST be covered."""
     total_added = sum(c['words_added'] for c in all_changes)
     preview_lines.insert(1, f"Total: +{total_added} words across {len(all_changes)} episodes\n")
 
-    # Verify topic coverage - CRITICAL for ensuring no content is missed
+    # NEW: Enhanced topic coverage verification for balanced allocation
     coverage_result = verify_topic_coverage(final_text, all_topics)
+    balanced_coverage_result = verify_balanced_topic_coverage(final_text, topic_allocation)
     final_word_count = len(final_text.split())
 
-    preview_lines.append(f"\n📊 Coverage Analysis: {final_word_count} words generated")
-    preview_lines.append(f"   Topics covered: {len(coverage_result['covered'])}/{len(all_topics)} ({coverage_result['coverage_rate']*100:.0f}%)")
+    # Store enhanced coverage analysis on job
+    job.allocation_summary = allocation_summary
+    job.allocation_summary['coverage_analysis'] = {
+        'traditional_coverage': coverage_result,
+        'balanced_coverage': balanced_coverage_result,
+        'final_word_count': final_word_count
+    }
 
+    preview_lines.append(f"\n📊 Enhanced Coverage Analysis: {final_word_count} words generated")
+    preview_lines.append(f"   Topics covered: {len(coverage_result['covered'])}/{len(all_topics)} ({coverage_result['coverage_rate']*100:.0f}%)")
+    preview_lines.append(f"   Allocation balance: {balanced_coverage_result['balance_score']:.3f}/1.0 ({allocation_summary['balance_score']:.3f} distribution)")
+
+    # Show topic distribution across episodes
+    if topic_allocation:
+        episode_distribution = []
+        for ep_num in sorted(topic_allocation.keys()):
+            allocated_count = len(topic_allocation[ep_num])
+            if allocated_count > 0:
+                episode_distribution.append(f"Ep{ep_num}: {allocated_count} topics")
+        if episode_distribution:
+            preview_lines.append(f"   Topic distribution: {', '.join(episode_distribution)}")
+
+    # Enhanced warnings for both coverage and balance issues
+    issues_found = []
     if not coverage_result['fully_covered']:
-        missing_list = "\n".join(f"      ❌ {t[:70]}" for t in coverage_result['missing'][:8])
-        preview_lines.append(f"\n⚠️  WARNING: {len(coverage_result['missing'])} topics may not be adequately covered:")
-        preview_lines.append(missing_list)
-        if len(coverage_result['missing']) > 8:
-            preview_lines.append(f"      ... and {len(coverage_result['missing']) - 8} more")
-        preview_lines.append("\n💡 SUGGESTION: Add a note in the suggestion box to ensure these topics are included,")
-        preview_lines.append("   or select a longer podcast length to allow more comprehensive coverage.")
+        issues_found.append(f"{len(coverage_result['missing'])} topics under-covered")
+    if balanced_coverage_result['underrepresented_topics']:
+        issues_found.append(f"{len(balanced_coverage_result['underrepresented_topics'])} topics unbalanced")
+
+    if issues_found:
+        preview_lines.append(f"\n⚠️  QUALITY ISSUES: {', '.join(issues_found)}")
+
+        # Show traditional coverage issues
+        if not coverage_result['fully_covered']:
+            missing_list = "\n".join(f"      ❌ {t[:70]}" for t in coverage_result['missing'][:5])
+            preview_lines.append(f"   Under-covered topics:")
+            preview_lines.append(missing_list)
+            if len(coverage_result['missing']) > 5:
+                preview_lines.append(f"      ... and {len(coverage_result['missing']) - 5} more")
+
+        # Show balance-specific issues
+        if balanced_coverage_result['underrepresented_topics']:
+            unbalanced_list = "\n".join(f"      ⚖️ {topic}: {balanced_coverage_result['topic_word_counts'][topic]} words"
+                                       for topic in balanced_coverage_result['underrepresented_topics'][:3])
+            preview_lines.append(f"   Unbalanced topics (word counts):")
+            preview_lines.append(unbalanced_list)
+
+        preview_lines.append("\n💡 SUGGESTION: These issues typically resolve with longer podcast lengths or user guidance.")
 
     # Enterprise performance metrics for monitoring dashboard
     preview_lines.append(f"\n⚡ ENTERPRISE METRICS:")
@@ -4293,6 +4625,131 @@ Remember: ALL topics listed above MUST be covered."""
                 preview_lines.append(f"  💡 Recommendations: {recommendations[0]}")
         else:
             preview_lines.append(f"  ✅ Comedy quality looks excellent!")
+
+    # NEW: Extended Mode Length Enforcement - Multi-pass enhancement for 6000-word target
+    if job.target_length == PodcastLength.EXTENDED and not is_comprehensive_mode:
+        target_words = 6000
+        actual_words = len(final_text.split())
+        word_shortfall = target_words - actual_words
+
+        if actual_words < target_words * 0.85:  # Less than 85% of target (5100 words)
+            logger.info(f"Extended mode length enforcement: {actual_words} words < {target_words * 0.85:.0f} target, initiating expansion")
+            preview_lines.append(f"\n🎯 Extended Mode Length Enforcement:")
+            preview_lines.append(f"   Current: {actual_words} words | Target: {target_words} words | Shortfall: {word_shortfall}")
+
+            # Iterative expansion up to 3 additional passes
+            expansion_passes = 0
+            max_passes = 3
+            expansion_results = []
+
+            while actual_words < target_words * 0.95 and expansion_passes < max_passes:  # Within 5% of target
+                expansion_passes += 1
+                pass_start_words = actual_words
+
+                logger.info(f"Extended mode expansion pass {expansion_passes}/{max_passes}: starting with {actual_words} words")
+
+                # Build expansion prompt for this pass
+                words_needed = target_words - actual_words
+                expansion_prompt = f"""
+EXTENDED MODE LENGTH EXPANSION - PASS {expansion_passes}
+
+CRITICAL REQUIREMENT: This podcast is in Extended mode and MUST reach approximately {target_words} words.
+Current word count: {actual_words} words
+Words needed: {words_needed} words
+Target expansion: {words_needed / max(actual_words, 1):.1f}x
+
+EXPANSION STRATEGY FOR PASS {expansion_passes}:
+1. Add comprehensive examples and case studies for EACH topic covered
+2. Include detailed analogies and real-world applications
+3. Have ALEX ask follow-up questions that SARAH answers in depth
+4. Add expert perspectives and multiple viewpoints on each topic
+5. Include relevant historical context and future implications
+6. Expand technical explanations with clear, educational detail
+7. Add interesting tangents and connections between topics
+
+QUALITY REQUIREMENTS:
+- Maintain natural dialogue flow between ALEX and SARAH
+- Ensure educational value in every addition
+- Use conversational, engaging tone throughout
+- Do not add repetitive or filler content
+- Focus on depth and insight, not just word count
+
+Generate the expanded dialogue now:
+"""
+
+                # Re-enhance the final text with expansion instruction
+                try:
+                    # Use the same enhancement logic but with expansion focus
+                    expansion_tasks = []
+                    for ep in episodes:
+                        ep_num = ep['episode_num']
+                        research = research_map.get(ep_num, '')
+                        allocated_topics = topic_allocation.get(ep_num, [])
+
+                        expansion_task = {
+                            'episode_num': ep_num,
+                            'text': enhanced_map.get(ep_num, ep['text']),  # Use already enhanced version
+                            'research': research,
+                            'speakers': ['ALEX', 'SARAH'],
+                            'style_guidance': expansion_prompt,
+                            'job': job
+                        }
+                        expansion_tasks.append(expansion_task)
+
+                    # Process expansion in parallel
+                    expansion_pool = GeventPool(size=min(len(expansion_tasks), SAFE_ENHANCE_AGENTS))
+                    expansion_results_raw = list(expansion_pool.imap_unordered(enhance_episode_with_claude, expansion_tasks))
+
+                    # Rebuild enhanced_map with expansion results
+                    for result in expansion_results_raw:
+                        if result['success']:
+                            ep_num = result.get('episode_num', 0)
+                            enhanced_map[ep_num] = result['enhanced_text']
+
+                    # Rebuild final text from enhanced episodes
+                    result_parts = []
+                    for ep in episodes:
+                        ep_num = ep['episode_num']
+                        if ep_num in enhanced_map:
+                            clean = re.sub(r'\[RESEARCH[^\]]*\].*?\[END[^\]]*\]', '', enhanced_map[ep_num], flags=re.DOTALL)
+                            result_parts.append(clean.strip())
+                        else:
+                            result_parts.append(ep['text'])
+
+                    final_text = '\n\n'.join(result_parts)
+                    job.final_text = final_text
+                    actual_words = len(final_text.split())
+
+                    words_added_this_pass = actual_words - pass_start_words
+                    expansion_results.append(f"Pass {expansion_passes}: +{words_added_this_pass} words ({pass_start_words} → {actual_words})")
+
+                    logger.info(f"Extended mode expansion pass {expansion_passes} complete: {words_added_this_pass} words added")
+
+                except Exception as e:
+                    logger.error(f"Extended mode expansion pass {expansion_passes} failed: {e}")
+                    expansion_results.append(f"Pass {expansion_passes}: failed ({e})")
+                    break
+
+            # Update preview with expansion results
+            if expansion_passes > 0:
+                final_word_count = len(final_text.split())  # Update final word count after expansion
+                preview_lines.append(f"   Expansion passes: {expansion_passes}/{max_passes}")
+                for result in expansion_results:
+                    preview_lines.append(f"      {result}")
+
+                target_achievement = (final_word_count / target_words) * 100
+                if final_word_count >= target_words * 0.95:
+                    preview_lines.append(f"   ✅ Target achieved: {final_word_count} words ({target_achievement:.1f}% of target)")
+                else:
+                    preview_lines.append(f"   ⚠️ Target missed: {final_word_count} words ({target_achievement:.1f}% of target)")
+
+                # Re-run coverage verification after expansion
+                coverage_result = verify_topic_coverage(final_text, all_topics)
+                balanced_coverage_result = verify_balanced_topic_coverage(final_text, topic_allocation)
+        else:
+            # Extended mode already meets target length
+            target_achievement = (actual_words / target_words) * 100
+            preview_lines.append(f"\n🎯 Extended Mode Target: ✅ {actual_words} words ({target_achievement:.1f}% of {target_words}-word target)")
 
     return StageResult(
         stage=Stage.ENHANCE,
@@ -4331,6 +4788,7 @@ def run_stage_generate(job: Job) -> StageResult:
     job_dir.mkdir(exist_ok=True)
 
     # NEW: Script timing parser integration for pre-written scripts
+    script_timing_parser = ScriptTimingParser()
     has_script_timing = script_timing_parser.detect_script_mode(text)
 
     if has_script_timing:
@@ -5761,10 +6219,6 @@ class ScriptTimingParser:
         # For now: return placeholder or silence
         logger.info(f"🔊 Sound effect requested: '{description}' (AI generation not yet implemented)")
         return f"__SOUND_EFFECT_{description.replace(' ', '_')}__"
-
-
-# Initialize global script timing parser
-script_timing_parser = ScriptTimingParser()
 
 
 # ============================================================================

@@ -323,6 +323,11 @@ class Job:
     final_text: str = ""
     detected_topics: List[str] = field(default_factory=list)  # Topics detected in analyze stage for mandatory coverage
 
+    # Topic allocation for balanced distribution (eliminates early-topic bias)
+    topic_allocation: Dict[int, List[str]] = field(default_factory=dict)  # Maps episode_num -> assigned topics
+    topic_metadata: List[Dict[str, Any]] = field(default_factory=list)  # Topic complexity metadata for balanced allocation
+    allocation_summary: Dict[str, Any] = field(default_factory=dict)  # Balance metrics and allocation statistics
+
     # News format metadata (for Perplexity Personalized News Threads)
     is_news_format: bool = False
     news_metadata: Dict[str, Any] = field(default_factory=dict)  # Maps topic title -> NewsTopicMetadata
