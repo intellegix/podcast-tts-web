@@ -3202,16 +3202,26 @@ def detect_news_compilation_format(text: str) -> bool:
 def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
     """Detect distinct topics/sections in the input text."""
 
+    # SAFETY: Limit processing for very large content to prevent hanging
+    MAX_CONTENT_SIZE = 100000  # 100KB limit for topic detection
+    if len(text) > MAX_CONTENT_SIZE:
+        logger.warning(f"Large content detected ({len(text)} chars), truncating to {MAX_CONTENT_SIZE} for topic analysis")
+        text = text[:MAX_CONTENT_SIZE] + "..."
+
     # Check for Perplexity News format first
-    if detect_perplexity_news_format(text):
-        logger.info("Detected Perplexity Personalized News Threads format")
-        topics, news_metadata = parse_perplexity_news_threads(text)
-        return topics, news_metadata  # Return both topics and metadata
+    try:
+        if detect_perplexity_news_format(text):
+            logger.info("Detected Perplexity Personalized News Threads format")
+            topics, news_metadata = parse_perplexity_news_threads(text)
+            return topics, news_metadata  # Return both topics and metadata
+    except Exception as e:
+        logger.warning(f"Error in news format detection, falling back to standard: {e}")
 
     # Standard format processing
     topics = []
+    MAX_TOPICS = 50  # Limit topics to prevent excessive processing
 
-    # Common topic indicators
+    # Common topic indicators (optimized for performance)
     topic_patterns = [
         r'^#{1,3}\s+(.+)$',  # Markdown headers
         r'^\*\*(.+?)\*\*\s*$',  # Bold lines as headers
@@ -3221,8 +3231,11 @@ def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
         r'(?:^|\n)([A-Z][^.!?\n]{20,80}):(?:\n|$)',  # Title-case lines ending with colon
     ]
 
-    lines = text.split('\n')
+    lines = text.split('\n')[:2000]  # Limit to first 2000 lines for performance
     for line in lines:
+        if len(topics) >= MAX_TOPICS:  # Stop if we have enough topics
+            logger.info(f"Reached maximum topic limit ({MAX_TOPICS}), stopping analysis")
+            break
         line = line.strip()
         if not line:
             continue
@@ -5203,7 +5216,24 @@ def run_job_stage(job_id: str, stage: Stage):
     try:
         # Run appropriate stage processor with performance tracking
         if stage == Stage.ANALYZE:
-            result = run_stage_analyze(job)
+            # Add timeout wrapper for analyze stage (2 minutes max)
+            import gevent
+
+            ANALYZE_TIMEOUT = 120  # 2 minutes max for analysis
+            logger.info(f"Job {job_id}: Starting analysis with {ANALYZE_TIMEOUT}s timeout")
+
+            try:
+                with gevent.Timeout(ANALYZE_TIMEOUT):
+                    result = run_stage_analyze(job)
+            except gevent.Timeout:
+                logger.error(f"Job {job_id}: Analysis stage timed out after {ANALYZE_TIMEOUT} seconds")
+                # Return error result with timeout information
+                result = StageResult(
+                    stage=Stage.ANALYZE,
+                    output_preview="Analysis timed out - content too large or complex for analysis.\n\nPlease try with smaller content or break it into sections.",
+                    full_output={'episodes': [], 'topics': [], 'estimated_words_needed': 0, 'length_adequate': False},
+                    metadata={'error': 'timeout', 'duration': ANALYZE_TIMEOUT, 'timeout_reason': 'Analysis stage exceeded 2-minute limit'}
+                )
         elif stage == Stage.RESEARCH:
             # NEW: Add timeout wrapper for research stage (5 minutes max)
             import gevent
