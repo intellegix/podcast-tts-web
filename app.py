@@ -3199,14 +3199,74 @@ def detect_news_compilation_format(text: str) -> bool:
     return is_news_compilation
 
 
-def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
-    """Detect distinct topics/sections in the input text."""
+def detect_topics_with_claude(text: str) -> List[str]:
+    """Use Claude to extract topics from complex content that might overwhelm regex patterns"""
+    client = get_claude_client()
+    if not client:
+        logger.warning("Claude API not available for topic detection")
+        return []
 
-    # SAFETY: Limit processing for very large content to prevent hanging
-    MAX_CONTENT_SIZE = 100000  # 100KB limit for topic detection
-    if len(text) > MAX_CONTENT_SIZE:
-        logger.warning(f"Large content detected ({len(text)} chars), truncating to {MAX_CONTENT_SIZE} for topic analysis")
-        text = text[:MAX_CONTENT_SIZE] + "..."
+    try:
+        # For very large content, take a strategic sample
+        if len(text) > 50000:  # 50KB limit for Claude analysis
+            # Take beginning, middle, and end sections to get comprehensive overview
+            chunk_size = 15000
+            beginning = text[:chunk_size]
+            middle_start = len(text) // 2 - chunk_size // 2
+            middle = text[middle_start:middle_start + chunk_size]
+            end = text[-chunk_size:]
+            sampled_text = f"{beginning}\n\n[...content continues...]\n\n{middle}\n\n[...content continues...]\n\n{end}"
+        else:
+            sampled_text = text
+
+        response = client.messages.create(
+            model="claude-3-5-haiku-20241022",  # Fast model for topic analysis
+            max_tokens=1000,  # Reasonable limit for topic list
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Analyze this content and extract the main topics, sections, or themes.
+
+Return ONLY a numbered list of topics (maximum 50 topics), one per line. Be concise but descriptive.
+
+Examples:
+1. Introduction to Machine Learning
+2. Neural Network Architectures
+3. Training Data Preparation
+4. Model Evaluation Techniques
+
+Content to analyze:
+{sampled_text}"""
+                }
+            ]
+        )
+
+        topics_text = response.content[0].text.strip()
+
+        # Parse the numbered list into clean topics
+        topics = []
+        for line in topics_text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+
+            # Extract topic after number prefix
+            topic_match = re.match(r'^\d+\.\s*(.+)$', line)
+            if topic_match:
+                topic = topic_match.group(1).strip()
+                if len(topic) > 10 and topic not in topics:  # Avoid duplicates and too-short topics
+                    topics.append(topic[:100])  # Limit topic length
+
+        logger.info(f"Claude detected {len(topics)} topics from {len(text)} character content")
+        return topics[:50]  # Safety limit
+
+    except Exception as e:
+        logger.error(f"Claude topic detection failed: {e}")
+        return []
+
+
+def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
+    """Detect distinct topics/sections in the input text using Claude AI for complex content."""
 
     # Check for Perplexity News format first
     try:
@@ -3217,9 +3277,35 @@ def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
     except Exception as e:
         logger.warning(f"Error in news format detection, falling back to standard: {e}")
 
-    # Standard format processing
+    # For large or complex content, use Claude's intelligent analysis
+    content_size = len(text)
+    line_count = len(text.split('\n'))
+
+    # Use Claude if content is large, very structured, or has many lines
+    use_claude = (
+        content_size > 50000 or  # Large content (50KB+)
+        line_count > 1000 or     # Many lines
+        len(re.findall(r'#{2,4}|###|####', text)) > 20  # Heavily structured markdown
+    )
+
+    if use_claude:
+        logger.info(f"Using Claude for topic detection (size: {content_size} chars, lines: {line_count})")
+        claude_topics = detect_topics_with_claude(text)
+        if claude_topics:  # If Claude successfully extracted topics
+            return claude_topics, []
+        else:
+            logger.warning("Claude topic detection failed, falling back to regex patterns")
+
+    # Fallback: Traditional regex-based processing for simpler content
+    logger.info(f"Using regex patterns for topic detection (size: {content_size} chars)")
     topics = []
     MAX_TOPICS = 50  # Limit topics to prevent excessive processing
+
+    # SAFETY: Limit processing for very large content to prevent hanging
+    MAX_CONTENT_SIZE = 100000  # 100KB limit for regex processing
+    if len(text) > MAX_CONTENT_SIZE:
+        logger.warning(f"Large content detected ({len(text)} chars), truncating to {MAX_CONTENT_SIZE} for regex analysis")
+        text = text[:MAX_CONTENT_SIZE] + "..."
 
     # Common topic indicators (optimized for performance)
     topic_patterns = [
