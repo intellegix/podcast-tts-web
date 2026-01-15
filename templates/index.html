@@ -912,7 +912,19 @@
                 this.previewStageName.textContent = preview.stage_name + ' Complete';
 
                 // Update preview content
-                this.previewContent.textContent = preview.preview || 'No preview available';
+                let previewText = preview.preview || 'No preview available';
+
+                // Check if upgrade is available (ANALYZE stage only)
+                const metadata = data.metadata || {};
+                if (metadata.needs_upgrade && metadata.upgrade_options && metadata.upgrade_options.length > 0) {
+                    // Add upgrade panel to preview content
+                    this.previewContent.innerHTML = `
+                        <div class="preview-text">${this.escapeHtml(previewText)}</div>
+                        ${this.renderUpgradePanel(metadata)}
+                    `;
+                } else {
+                    this.previewContent.textContent = previewText;
+                }
 
                 // Show citations if available (research stage)
                 if (preview.citations && preview.citations.length > 0) {
@@ -969,6 +981,102 @@
 
             hidePreviewPanel() {
                 this.previewPanel.classList.add('hidden');
+            }
+
+            renderUpgradePanel(metadata) {
+                const options = metadata.upgrade_options || [];
+
+                return `
+                    <div class="upgrade-panel">
+                        <div class="upgrade-header">
+                            <h4>🚀 Length Upgrade Available</h4>
+                            <p>Your content has <strong>${metadata.topic_count || 0} topics</strong> but current length may not provide full coverage.</p>
+                            <p>Current: ${metadata.current_length || 'Unknown'} → Estimated need: ${(metadata.estimated_words_needed || 0).toLocaleString()} words</p>
+                        </div>
+
+                        <div class="upgrade-options">
+                            ${options.map(option => {
+                                const coverageText = option.coverage_ratio === Infinity || option.coverage_ratio > 10
+                                    ? '100%+'
+                                    : Math.min(100, option.coverage_ratio * 100).toFixed(0) + '%';
+                                const wordText = option.word_target
+                                    ? `~${option.word_target.toLocaleString()} words`
+                                    : 'No limits';
+
+                                return `
+                                    <div class="upgrade-option" data-length="${option.length}">
+                                        <div class="option-header">
+                                            <strong>${option.display_name || option.length.toUpperCase()}</strong>
+                                            <span class="option-words">(${wordText})</span>
+                                        </div>
+                                        <div class="option-description">${this.escapeHtml(option.description || '')}</div>
+                                        <div class="option-coverage">Coverage: ${coverageText}</div>
+                                        <button class="btn-upgrade" onclick="pipeline.upgradeLength('${option.length}')">
+                                            Upgrade to ${option.display_name || option.length}
+                                        </button>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+
+                        <div class="upgrade-footer">
+                            <p><em>Or continue with current length (some topics may be abbreviated)</em></p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            async upgradeLength(newLength) {
+                if (!this.jobId) {
+                    this.showMessage('No active job to upgrade', 'error');
+                    return;
+                }
+
+                try {
+                    // Show loading state
+                    this.showMessage(`Upgrading to ${newLength} length...`, 'info');
+
+                    // Disable upgrade buttons to prevent double-clicks
+                    document.querySelectorAll('.btn-upgrade').forEach(btn => btn.disabled = true);
+
+                    // Call upgrade endpoint
+                    const response = await fetch(`/api/job/${this.jobId}/upgrade`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            new_length: newLength,
+                            user_confirmation: true
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Upgrade failed');
+                    }
+
+                    const result = await response.json();
+
+                    // Show success message
+                    this.showMessage(`✅ Upgraded to ${result.message || newLength.toUpperCase()}! Continuing with full coverage...`, 'success');
+
+                    // Log the upgrade action
+                    addActivity('🚀', `Upgraded from ${result.old_length || 'current'} to ${result.new_length} length`, 'upgrade');
+
+                    // Hide preview panel since job is now running
+                    this.hidePreviewPanel();
+
+                    // Resume pipeline polling (job was reset to RESEARCH stage)
+                    this.startPolling();
+
+                } catch (error) {
+                    this.showMessage(`❌ Upgrade failed: ${error.message}`, 'error');
+                    console.error('Length upgrade error:', error);
+
+                    // Re-enable buttons on error
+                    document.querySelectorAll('.btn-upgrade').forEach(btn => btn.disabled = false);
+                }
             }
 
             async continueWithSuggestion(suggestion) {

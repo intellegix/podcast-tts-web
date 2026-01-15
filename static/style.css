@@ -1590,3 +1590,170 @@ footer {
 .activity-item.expand {
     border-left: 3px solid #f59e0b;
 }
+
+/* Length Upgrade Panel */
+.upgrade-panel {
+    background: rgba(59, 130, 246, 0.08);
+    backdrop-filter: blur(10px);
+    border: 2px solid #3b82f6;
+    border-radius: 1rem;
+    margin: 1.5rem 0;
+    padding: 1.5rem;
+    box-shadow: 0 4px 6px rgba(59, 130, 246, 0.1);
+    animation: slideUp 0.3s ease;
+}
+
+.upgrade-header {
+    margin-bottom: 1.5rem;
+}
+
+.upgrade-header h4 {
+    color: #60a5fa;
+    margin: 0 0 0.5rem 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.upgrade-header p {
+    margin: 0 0 0.5rem 0;
+    color: #d4d4d8;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+
+.upgrade-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.upgrade-option {
+    background: rgba(0, 0, 0, 0.3);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+    transition: all 0.2s ease;
+}
+
+.upgrade-option:hover {
+    border-color: #3b82f6;
+    box-shadow: 0 4px 8px rgba(59, 130, 246, 0.15);
+    transform: translateY(-2px);
+}
+
+.option-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.option-header strong {
+    color: #60a5fa;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.option-words {
+    color: #a1a1aa;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.option-description {
+    color: #d4d4d8;
+    margin-bottom: 0.75rem;
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.option-coverage {
+    color: #10b981;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.option-coverage::before {
+    content: "📊";
+    font-size: 0.8rem;
+}
+
+.btn-upgrade {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: white;
+    border: none;
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    width: 100%;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+}
+
+.btn-upgrade:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+}
+
+.btn-upgrade:active {
+    transform: translateY(0);
+}
+
+.btn-upgrade:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+.upgrade-footer {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 1rem;
+    margin-top: 1rem;
+}
+
+.upgrade-footer em {
+    color: #a1a1aa;
+    font-size: 0.85rem;
+    display: block;
+    text-align: center;
+}
+
+/* Activity item for upgrade actions */
+.activity-item.upgrade {
+    border-left: 3px solid #3b82f6;
+}
+
+/* Mobile responsiveness for upgrade panel */
+@media (max-width: 768px) {
+    .upgrade-panel {
+        margin: 1rem 0;
+        padding: 1rem;
+    }
+
+    .upgrade-options {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+
+    .option-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.25rem;
+    }
+
+    .upgrade-header h4 {
+        font-size: 1.1rem;
+    }
+}

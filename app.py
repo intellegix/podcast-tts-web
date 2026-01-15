@@ -2560,6 +2560,19 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
     episode_num = episode_data.get('episode_num', 0)
     episode_text = episode_data.get('text', '')
     header = episode_data.get('header', '')
+
+    # NEW: Validate content before proceeding
+    if not episode_text.strip() and not header.strip():
+        logger.warning(f"Empty episode content for episode {episode_num} - skipping research")
+        return {
+            'episode_num': episode_num,
+            'research': 'No content available for research',
+            'citations': [],
+            'success': False,
+            'research_angles': [],
+            'agent_count': 0
+        }
+
     topic = header if header else episode_text[:500]
 
     if not PERPLEXITY_API_KEY:
@@ -2649,9 +2662,36 @@ def research_episode_parallel(episode_data: dict, user_suggestion: str = "", num
             logger.error(f"Research angle failed: {e}")
         return {'content': '', 'citations': [], 'success': False}
 
-    # Run ALL angles in parallel
-    pool = GeventPool(size=len(research_angles))
-    results = list(pool.imap_unordered(query_single_angle, research_angles))
+    # Run ALL angles in parallel with timeout protection
+    try:
+        pool = GeventPool(size=len(research_angles))
+
+        # NEW: Add timeout to pool operations (3 minutes max for parallel research)
+        with gevent.Timeout(180):  # 3 minutes max for parallel research
+            results = list(pool.imap_unordered(query_single_angle, research_angles))
+
+    except gevent.Timeout:
+        logger.error(f"Research pool timed out after 180 seconds for episode {episode_num}")
+        # Return partial results instead of hanging
+        return {
+            'episode_num': episode_num,
+            'research': 'Research timed out - partial results may be incomplete',
+            'citations': [],
+            'success': False,
+            'research_angles': research_angles[:3],  # Return first 3 angles that were attempted
+            'agent_count': min(num_agents, 3)
+        }
+    except Exception as e:
+        logger.error(f"Research pool failed for episode {episode_num}: {e}")
+        # Return error result instead of hanging
+        return {
+            'episode_num': episode_num,
+            'research': f'Research failed: {str(e)}',
+            'citations': [],
+            'success': False,
+            'research_angles': [],
+            'agent_count': 0
+        }
 
     # Combine results
     combined_research = []
@@ -3061,6 +3101,14 @@ def efficient_source_selection(sources: List[str], target_count: int) -> List[st
 def detect_news_compilation_format(text: str) -> bool:
     """Detect if text is a comprehensive news compilation that would benefit from prioritization"""
     import re
+
+    # NEW: Exclude small content from news compilation path to prevent routing issues
+    word_count = len(text.split())
+    topic_count = len(detect_topics(text)[0])
+
+    if word_count < 1000 or topic_count <= 5:
+        logger.info(f"Small content detected ({word_count} words, {topic_count} topics) - using standard research path")
+        return False
 
     # Count potential headlines in various formats
     headline_patterns = [
@@ -3648,9 +3696,44 @@ def run_stage_analyze(job: Job) -> StageResult:
             'length_warning': length_warning is not None,
             'is_news_format': job.is_news_format,
             'news_url_count': len(job.news_urls) if job.news_urls else 0,
-            'auto_recommend_comprehensive': auto_recommend_comprehensive
+            'auto_recommend_comprehensive': auto_recommend_comprehensive,
+            # Length upgrade detection fields
+            'needs_upgrade': coverage_ratio < 0.7,  # Same threshold as length_warning
+            'recommended_length': recommended_length,
+            'current_length': length_name,
+            'upgrade_options': _generate_upgrade_options(job.target_length, estimated_words_needed) if coverage_ratio < 0.7 else []
         }
     )
+
+
+def _generate_upgrade_options(current_length: PodcastLength, estimated_words_needed: int) -> list:
+    """Generate available upgrade options based on current length and content needs"""
+    current_word_target = PodcastLength.get_config(current_length).get('word_target', 0) or 0
+    upgrade_options = []
+
+    # Available upgrade lengths (in order of word targets)
+    upgrade_candidates = [
+        (PodcastLength.EXTENDED, 'Full coverage with detailed explanations'),
+        (PodcastLength.COMPREHENSIVE, 'Maximum detail, no word limits')
+    ]
+
+    for length, description in upgrade_candidates:
+        length_config = PodcastLength.get_config(length)
+        word_target = length_config.get('word_target')
+
+        # Only include if it's an upgrade (higher word target)
+        if word_target is None or word_target > current_word_target:
+            coverage_ratio = float('inf') if word_target is None else word_target / max(estimated_words_needed, 1)
+
+            upgrade_options.append({
+                'length': length.value,
+                'display_name': length_config['display_name'],
+                'word_target': word_target,
+                'coverage_ratio': coverage_ratio,
+                'description': description
+            })
+
+    return upgrade_options
 
 
 def run_stage_research(job: Job) -> StageResult:
@@ -3669,7 +3752,14 @@ def run_stage_research(job: Job) -> StageResult:
         # Scale agents based on content complexity
         topic_bonus = min(topic_count // 5, 8)  # +1 agent per 5 topics, max +8
         user_source_bonus = min(user_source_count // 3, 5)  # +1 agent per 3 user sources, max +5
-        num_agents = base_agents + topic_bonus + user_source_bonus
+        calculated_agents = base_agents + topic_bonus + user_source_bonus
+
+        # NEW: Cap agents for comprehensive mode with small content to prevent API overwhelming
+        if job.target_length == PodcastLength.COMPREHENSIVE and topic_count <= 5:
+            num_agents = min(calculated_agents, 6)  # Max 6 agents for small comprehensive content
+            logger.info(f"Comprehensive mode with small content ({topic_count} topics): limited to {num_agents} agents")
+        else:
+            num_agents = calculated_agents
 
         job.research_scaling_applied = True
         job.total_research_agents = num_agents
@@ -3835,8 +3925,8 @@ def run_stage_research_with_prioritization(job: Job) -> StageResult:
             try:
                 # Use the existing research_episode_parallel but with adapted data
                 fake_episode = {
-                    'topic': headline['title'],
-                    'content': headline.get('content', ''),
+                    'text': headline.get('content', headline['title']),  # Use content or fallback to title
+                    'header': headline['title'],                         # Use title as header
                     'episode_num': len(all_research_results) + 1
                 }
 
@@ -5068,12 +5158,30 @@ def run_job_stage(job_id: str, stage: Stage):
         if stage == Stage.ANALYZE:
             result = run_stage_analyze(job)
         elif stage == Stage.RESEARCH:
-            # Check if content is a news compilation that benefits from intelligent prioritization
-            if detect_news_compilation_format(job.text):
-                logger.info(f"Job {job_id}: Using intelligent news prioritization for large compilation")
-                result = run_stage_research_with_prioritization(job)
-            else:
-                result = run_stage_research(job)
+            # NEW: Add timeout wrapper for research stage (5 minutes max)
+            import gevent
+
+            RESEARCH_TIMEOUT = 300  # 5 minutes max for any research
+            logger.info(f"Job {job_id}: Starting research with {RESEARCH_TIMEOUT}s timeout")
+
+            try:
+                with gevent.Timeout(RESEARCH_TIMEOUT):
+                    # Check if content is a news compilation that benefits from intelligent prioritization
+                    if detect_news_compilation_format(job.text):
+                        logger.info(f"Job {job_id}: Using intelligent news prioritization for large compilation")
+                        result = run_stage_research_with_prioritization(job)
+                    else:
+                        result = run_stage_research(job)
+
+            except gevent.Timeout:
+                logger.error(f"Job {job_id}: Research stage timed out after {RESEARCH_TIMEOUT} seconds")
+                # Return partial result with timeout error
+                result = StageResult(
+                    stage=Stage.RESEARCH,
+                    output_preview="Research timed out - please try with smaller content or shorter podcast length",
+                    full_output={'research_map': {}},
+                    metadata={'error': 'timeout', 'duration': RESEARCH_TIMEOUT, 'timeout_reason': 'Research stage exceeded 5-minute limit'}
+                )
         elif stage == Stage.EXPAND:
             result = run_stage_expand(job)
         elif stage == Stage.ENHANCE:
@@ -5364,6 +5472,92 @@ def continue_interactive_job(job_id):
         job.status = JobStatus.COMPLETE
         job_store.update_job(job)
         return jsonify({'status': 'complete'})
+
+
+@app.route('/api/job/<job_id>/upgrade', methods=['POST'])
+@login_required
+@limiter.limit("10 per hour")
+def upgrade_job_length(job_id):
+    """
+    Upgrade a job's target length mid-pipeline
+
+    Expected JSON body:
+    {
+        "new_length": "extended",
+        "user_confirmation": true
+    }
+    """
+    try:
+        job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
+        job = job_store.get_job(job_id)
+
+        if not job:
+            return jsonify({'error': 'Job not found'}), 404
+
+        # Validate job is in correct state for upgrade (after ANALYZE stage)
+        if job.current_stage != Stage.ANALYZE or job.status != JobStatus.PAUSED_FOR_REVIEW:
+            return jsonify({'error': 'Upgrades only allowed after ANALYZE stage while paused for review'}), 400
+
+        # Parse request
+        data = request.get_json() or {}
+        new_length = data.get('new_length', '').lower().strip()
+        user_confirmation = data.get('user_confirmation', False)
+
+        if not new_length:
+            return jsonify({'error': 'new_length is required'}), 400
+
+        if not user_confirmation:
+            return jsonify({'error': 'user_confirmation must be true'}), 400
+
+        # Validate new length enum value
+        try:
+            new_length_obj = PodcastLength(new_length)
+        except ValueError:
+            valid_lengths = [length.value for length in PodcastLength]
+            return jsonify({'error': f'Invalid length "{new_length}". Valid options: {valid_lengths}'}), 400
+
+        # Validate new length is an upgrade (higher word target)
+        current_word_target = job.get_length_config().get('word_target') or 0
+        new_word_target = PodcastLength.get_config(new_length_obj).get('word_target')
+
+        # Handle unlimited word targets (None = unlimited)
+        if new_word_target is not None and new_word_target <= current_word_target:
+            return jsonify({'error': 'New length must be an upgrade (higher word target or unlimited)'}), 400
+
+        # Perform upgrade
+        old_length = job.target_length.value
+        job.target_length = new_length_obj
+
+        # Add upgrade note to user suggestions for RESEARCH stage
+        upgrade_note = f"User upgraded from {old_length} to {new_length} for full content coverage"
+        job.user_suggestions[Stage.RESEARCH] = upgrade_note
+
+        # Reset to RESEARCH stage to use new length parameters
+        next_stage = Stage.RESEARCH
+        job.current_stage = next_stage
+        job.status = JobStatus.RUNNING
+
+        # Update job store
+        job_store.update_job(job)
+
+        # Start next stage
+        gevent.spawn(run_job_stage, job.id, next_stage)
+
+        logger.info(f"Job {job_id} upgraded from {old_length} to {new_length}")
+
+        return jsonify({
+            'success': True,
+            'message': f'Upgraded to {new_length_obj.get_config()["display_name"]}',
+            'new_length': new_length,
+            'new_word_target': new_word_target,
+            'old_length': old_length,
+            'next_stage': next_stage.value,
+            'status': 'resumed'
+        })
+
+    except Exception as e:
+        logger.error(f"Job upgrade failed for {job_id}: {e}")
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/job/<job_id>', methods=['DELETE'])
