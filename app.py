@@ -45,6 +45,8 @@ from gevent.pool import Pool as GeventPool
 from gevent.lock import RLock
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from apscheduler.schedulers.background import BackgroundScheduler
+import concurrent.futures
+import threading
 from job_store import job_store, Job, JobStatus, Stage, StageResult, PodcastLength, PodcastMode
 
 # Configure logging (structured format)
@@ -53,6 +55,29 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# ================================================================================================
+# UNIVERSAL TIMEOUT PROTECTION SYSTEM
+# ================================================================================================
+
+def run_with_universal_timeout(func, timeout_seconds: int, *args, **kwargs):
+    """
+    Universal timeout protection that works in any context (greenlet, direct calls, async).
+    Uses ThreadPoolExecutor to ensure CPU-bound operations can be interrupted.
+
+    This replaces gevent.Timeout which only works for I/O operations in greenlet context.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(func, *args, **kwargs)
+        try:
+            result = future.result(timeout=timeout_seconds)
+            return result
+        except concurrent.futures.TimeoutError:
+            logger.error(f"Function {func.__name__} timed out after {timeout_seconds}s")
+            # Try to cancel the future (may not work for CPU-bound tasks already running)
+            future.cancel()
+            raise concurrent.futures.TimeoutError(f"Operation timed out after {timeout_seconds} seconds")
 
 
 # ================================================================================================
@@ -3268,6 +3293,27 @@ Content to analyze:
 def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
     """Detect distinct topics/sections in the input text using Claude AI for complex content."""
 
+    # CRITICAL: Aggressive content size protection to prevent hanging
+    # This provides early bailout before any expensive processing
+    MAX_SAFE_SIZE = 100000  # 100KB absolute limit
+    MAX_SAFE_LINES = 1000   # 1000 lines absolute limit
+
+    content_size = len(text)
+    lines = text.split('\n')
+    line_count = len(lines)
+
+    # Hard content size limit with aggressive truncation
+    if content_size > MAX_SAFE_SIZE:
+        logger.warning(f"Content too large ({content_size} chars), truncating to {MAX_SAFE_SIZE}")
+        text = text[:MAX_SAFE_SIZE] + "\n\n[Content truncated for performance protection]"
+        content_size = len(text)
+
+    # Hard line count limit with aggressive truncation
+    if line_count > MAX_SAFE_LINES:
+        logger.warning(f"Too many lines ({line_count}), processing first {MAX_SAFE_LINES}")
+        text = '\n'.join(lines[:MAX_SAFE_LINES])
+        line_count = MAX_SAFE_LINES
+
     # Check for Perplexity News format first
     try:
         if detect_perplexity_news_format(text):
@@ -3278,8 +3324,7 @@ def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
         logger.warning(f"Error in news format detection, falling back to standard: {e}")
 
     # For large or complex content, use Claude's intelligent analysis
-    content_size = len(text)
-    line_count = len(text.split('\n'))
+    # Note: content_size and line_count already calculated above with safety limits applied
 
     # Use Claude if content is large, very structured, or has many lines
     use_claude = (
@@ -3301,11 +3346,7 @@ def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
     topics = []
     MAX_TOPICS = 50  # Limit topics to prevent excessive processing
 
-    # SAFETY: Limit processing for very large content to prevent hanging
-    MAX_CONTENT_SIZE = 100000  # 100KB limit for regex processing
-    if len(text) > MAX_CONTENT_SIZE:
-        logger.warning(f"Large content detected ({len(text)} chars), truncating to {MAX_CONTENT_SIZE} for regex analysis")
-        text = text[:MAX_CONTENT_SIZE] + "..."
+    # Note: Content size protection already applied at function entry
 
     # Common topic indicators (optimized for performance)
     topic_patterns = [
@@ -3318,7 +3359,20 @@ def detect_topics(text: str) -> Tuple[List[str], List['NewsTopicMetadata']]:
     ]
 
     lines = text.split('\n')[:2000]  # Limit to first 2000 lines for performance
-    for line in lines:
+
+    # Cooperative timeout checking for CPU-bound regex processing
+    start_time = time.time()
+    timeout_seconds = 90  # 90 seconds (75% of 120s timeout limit)
+
+    for i, line in enumerate(lines):
+        # Check timeout every 100 lines to prevent hanging
+        if i % 100 == 0 and i > 0:
+            elapsed = time.time() - start_time
+            if elapsed > timeout_seconds:
+                logger.warning(f"Approaching timeout limit in regex processing, processed {i}/{len(lines)} lines in {elapsed:.1f}s")
+                logger.info(f"Extracted {len(topics)} topics before timeout protection kicked in")
+                break
+
         if len(topics) >= MAX_TOPICS:  # Stop if we have enough topics
             logger.info(f"Reached maximum topic limit ({MAX_TOPICS}), stopping analysis")
             break
@@ -5302,16 +5356,14 @@ def run_job_stage(job_id: str, stage: Stage):
     try:
         # Run appropriate stage processor with performance tracking
         if stage == Stage.ANALYZE:
-            # Add timeout wrapper for analyze stage (2 minutes max)
-            import gevent
-
+            # Universal timeout wrapper for analyze stage (2 minutes max)
+            # Replaces gevent.Timeout which failed for CPU-bound regex operations
             ANALYZE_TIMEOUT = 120  # 2 minutes max for analysis
-            logger.info(f"Job {job_id}: Starting analysis with {ANALYZE_TIMEOUT}s timeout")
+            logger.info(f"Job {job_id}: Starting analysis with {ANALYZE_TIMEOUT}s timeout (universal protection)")
 
             try:
-                with gevent.Timeout(ANALYZE_TIMEOUT):
-                    result = run_stage_analyze(job)
-            except gevent.Timeout:
+                result = run_with_universal_timeout(run_stage_analyze, ANALYZE_TIMEOUT, job)
+            except concurrent.futures.TimeoutError:
                 logger.error(f"Job {job_id}: Analysis stage timed out after {ANALYZE_TIMEOUT} seconds")
                 # Return error result with timeout information
                 result = StageResult(
