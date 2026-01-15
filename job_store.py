@@ -48,7 +48,7 @@ class PodcastLength(Enum):
                 'research_depth': 'surface',
                 'detail_level': 'minimal',
                 'word_target': 600,
-                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material - do not skip anything. Keep explanations brief but touch on every single point mentioned. Summarize each topic in 1-2 sentences. No tangents, but ensure complete coverage.',
+                'expand_instruction': 'CRITICAL: Cover ALL topics with engaging dialogue between ALEX and SARAH. Focus on key insights and encourage natural back-and-forth discussion. Keep conversations focused but allow natural conversational flow. Every topic must be covered through genuine dialogue.',
                 'enhance_instruction': 'Create a quick, punchy dialogue that covers ALL topics. Get to the point fast. Minimal banter but ensure every topic from the source is mentioned, even briefly.'
             },
             cls.SHORT: {
@@ -58,7 +58,7 @@ class PodcastLength(Enum):
                 'research_depth': 'moderate',
                 'detail_level': 'concise',
                 'word_target': 1200,
-                'expand_instruction': 'CRITICAL: Cover ALL topics and points from the source material - do not skip anything. Keep explanations concise with 1 brief example per major topic. Every point mentioned in the source must appear in the output.',
+                'expand_instruction': 'CRITICAL: Cover ALL topics with meaningful discussion between ALEX and SARAH. Include relevant examples and encourage follow-up questions between hosts. Allow natural conversation while staying focused on main points. Every topic must be thoroughly discussed.',
                 'enhance_instruction': 'Create engaging but efficient dialogue that covers ALL topics. Include 1-2 examples per topic. Every point from the source must be addressed, even if briefly.'
             },
             cls.MEDIUM: {

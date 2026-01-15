@@ -444,36 +444,50 @@ logger.info("Background scheduler started: cleanup (1h), keep-alive (14m)")
 atexit.register(lambda: scheduler.shutdown(wait=False))
 
 # Script expansion prompt for GPT-4o - Always creates two-person conversational podcast
-SCRIPT_EXPANSION_PROMPT = """You are an expert podcast scriptwriter creating entertaining, engaging two-person dialogue.
+SCRIPT_EXPANSION_PROMPT = """You are creating a natural, engaging podcast conversation between two hosts. This should sound like two friends genuinely discussing fascinating topics.
 
-SPEAKER REQUIREMENTS (STRICT):
-- Create EXACTLY two speakers in every episode:
-  - ALEX: The host/interviewer - introduces topics, asks thought-provoking questions, keeps conversation flowing
-  - SARAH: The expert/analyst - provides detailed insights, data, examples, and expert commentary
-- Use speaker names followed by colon (ALEX:, SARAH:)
-- NEVER use any other speaker names - ONLY ALEX and SARAH
+SPEAKER PERSONALITIES:
+- ALEX (Curious Host): Naturally curious, asks "why" and "how" questions, makes connections between topics ("Oh, that reminds me of..."), admits when surprised ("I didn't realize..."), uses conversational fillers ("Right?", "Interesting"), occasionally plays devil's advocate
+- SARAH (Insightful Analyst): Explains complex concepts with analogies, builds on ALEX's questions with deeper insights, uses phrases like "What's fascinating is..." and "The key thing to understand...", occasionally corrects misconceptions gently, adds context naturally
 
-DIALOGUE STYLE:
-- Create natural back-and-forth conversation (NOT monologues)
-- Each speaker turn should be 1-4 sentences, then switch speakers
-- ALEX asks questions, reacts with interest, provides transitions
-- SARAH explains, provides examples, shares insights
-- Include natural reactions: "That's fascinating!", "Great point!", "Let me add to that..."
-- Add light humor and personality where appropriate
-- Make it sound like a real conversation between friends who are experts
+CONVERSATION STYLE REQUIREMENTS:
+- Create NATURAL DIALOGUE, not scripted information delivery
+- Include tangents and organic topic transitions using natural bridges ("Speaking of that...", "That actually relates to...")
+- Add follow-up questions: "Wait, can you explain that more?", "That's fascinating because...", "So you're saying..."
+- Include authentic reactions: "Right!", "Exactly!", "I hadn't thought of that", "No way!", "That's incredible"
+- Allow hosts to build on each other's points and interrupt naturally (but politely)
+- Add thinking pauses: "Hmm, let me think about that...", "You know what's interesting..."
+- Include conversational asides and light humor that feels natural
+- Let topics develop depth through 2-3 exchanges when something is particularly interesting
+
+CRITICAL - AVOID THESE RECAP PATTERNS:
+- Recap-style language ("In summary", "To wrap up", "Overall", "The main points are")
+- Scripted information dumps or formal presentations
+- One-sentence responses to complex topics
+- End-of-episode conclusion tone
+- "Thank you for that summary. Moving on to..."
+- Listing points A, B, C in structured format
+
+NATURAL CONVERSATION PATTERNS TO INCLUDE:
+✅ DEPTH OVER BREADTH: When a topic is interesting, let hosts explore it for 2-3 exchanges
+✅ CURIOSITY CASCADES: One insight should lead to questions that reveal more insights
+✅ ENERGY VARIATION: Mix high-energy discoveries with thoughtful reflection moments
+✅ AUTHENTIC REACTIONS: Include genuine surprise, agreement, and gentle challenges
 
 CONTENT REQUIREMENTS:
-- Expand the outline into detailed, informative content
-- Include specific facts, statistics, and examples from the outline
-- Make technical content accessible and engaging
-- Aim for 800-1200 words per episode section
+- Expand the outline into detailed, informative content through natural conversation
+- Include specific facts, statistics, and examples woven into dialogue
+- Make technical content accessible through analogies and examples
+- Aim for 800-1200 words per episode section through genuine discussion, not information cramming
 
 FORMAT RULES:
+- Use speaker names followed by colon (ALEX:, SARAH:)
+- NEVER use any other speaker names - ONLY ALEX and SARAH
 - Do NOT include stage directions in parentheses like (laughs) or (pauses)
-- Do NOT use headers or bullet points - just dialogue
-- Start each line with speaker name: ALEX: or SARAH:
+- Do NOT use headers or bullet points - just natural dialogue
+- Each speaker turn should be 1-4 sentences, then switch speakers naturally
 
-OUTPUT: Return ONLY the expanded dialogue script with ALEX and SARAH speakers, no explanations."""
+OUTPUT: Return ONLY the expanded dialogue script with natural conversation between ALEX and SARAH, no explanations."""
 
 # Script expansion model
 SCRIPT_EXPANSION_MODEL = os.environ.get('SCRIPT_EXPANSION_MODEL', 'gpt-4o')
@@ -514,6 +528,25 @@ ENHANCEMENT RULES:
    - Use contractions naturally (don't, won't, can't)
 7. EMOTIONAL BEATS: Add moments of excitement, surprise, reflection
 8. LISTENER HOOKS: Tease upcoming content, create curiosity gaps
+
+CRITICAL: CONVERSATIONAL TONE PRESERVATION
+This should sound like a NATURAL CONVERSATION between friends, not a structured presentation.
+
+ENHANCE FOR:
+- Natural speech patterns and interruptions
+- Genuine curiosity and surprise in responses
+- Organic topic development through questions
+- Conversational momentum that builds excitement
+- Authentic personality differences between ALEX and SARAH
+- Natural tangents that feel organic to the conversation
+- Follow-up questions that dive deeper into interesting points
+
+NEVER ADD OR CHANGE TO:
+- Recap language ("So in summary", "To wrap up", "Overall", "The key takeaways")
+- Formal presentation structure or topic transitions
+- End-of-episode conclusion tone or wrap-up language
+- Scripted transitions like "Moving on to...", "Next, let's discuss..."
+- Information delivery style without genuine conversational reactions
 
 PRESERVE:
 - All factual information and technical details (expand on them with examples)
@@ -1458,12 +1491,26 @@ RESEARCH FINDINGS TO INCORPORATE:
 
 Use these facts, statistics, and insights naturally in the dialogue. Have SARAH cite specific data points and ALEX react with interest."""
 
-    user_prompt = f"""Expand this episode outline into a full podcast dialogue script:{speaker_info}{context_snippet}{research_section}
+    user_prompt = f"""Expand this episode outline into a natural, engaging podcast conversation:{speaker_info}{context_snippet}{research_section}
 
 EPISODE TO EXPAND:
 {outline_text}
 
-Write the complete dialogue now:"""
+CONVERSATION DEPTH REQUIREMENTS:
+- When topics are interesting, let ALEX and SARAH explore them for 2-3 exchanges
+- Include natural follow-up questions: "Can you elaborate on that?", "That's fascinating - what does that mean for..."
+- Add genuine reactions and surprise: "Wait, really?", "I had no idea", "That changes everything"
+- Create organic tangents when one topic naturally leads to another
+- Let conversations build momentum and excitement about discoveries
+- Include thinking moments: "Let me think about that...", "You know what's interesting..."
+
+AVOID:
+- Rushing through topics quickly
+- Summary-style presentations
+- Formal Q&A structure
+- Recap language
+
+Write the complete natural dialogue now:"""
 
     try:
         response = client.chat.completions.create(
