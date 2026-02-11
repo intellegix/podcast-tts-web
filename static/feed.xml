@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+     xmlns:atom="http://www.w3.org/2005/Atom"
+     xmlns:content="http://purl.org/rss/1.0/modules/content/"
+     xmlns:podcast="https://podcastindex.org/namespace/1.0">
+  <channel>
+    <title>Intellegix</title>
+    <link>https://podcast-tts-web.onrender.com</link>
+    <atom:link href="https://podcast-tts-web.onrender.com/static/feed.xml" rel="self" type="application/rss+xml"/>
+    <language>en-us</language>
+    <copyright>&#xA9; 2026 Intellegix. All rights reserved.</copyright>
+    <description>AI-generated news briefings covering global geopolitics, domestic policy, technology, and breaking events. Dual-host analysis with Marcus Rodriguez and Sarah Chen. Powered by artificial intelligence, curated for human understanding.</description>
+    <image>
+      <url>https://podcast-tts-web.onrender.com/static/episodes/cover.png</url>
+      <title>Intellegix</title>
+      <link>https://podcast-tts-web.onrender.com</link>
+    </image>
+    <itunes:author>Intellegix News</itunes:author>
+    <itunes:owner>
+      <itunes:name>Intellegix News</itunes:name>
+      <itunes:email>austin@intellegix.com</itunes:email>
+    </itunes:owner>
+    <itunes:explicit>false</itunes:explicit>
+    <itunes:category text="News">
+      <itunes:category text="Daily News"/>
+    </itunes:category>
+    <itunes:image href="https://podcast-tts-web.onrender.com/static/episodes/cover.png"/>
+    <itunes:type>episodic</itunes:type>
+    <podcast:locked>no</podcast:locked>
+
+    <!-- Feb 11, 2026 - Tuesday News Briefing (Episodes 21-30) -->
+    <item>
+      <title>Feb 11: Closing</title>
+      <description><![CDATA[Weekly outlook and key threads to watch from the February 11, 2026 news cycle. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-10-Closing.mp3" length="3984588" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-10-closing</guid>
+      <pubDate>Tue, 11 Feb 2026 21:00:00 -0800</pubDate>
+      <itunes:episode>30</itunes:episode>
+      <itunes:duration>192</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 11: Sports &amp; Entertainment</title>
+      <description><![CDATA[Bad Bunny wipes Instagram after record 135M-viewer Super Bowl halftime show. GOP congressman seeks federal probe of the performance. Chloe Kim leads Team USA defense amid political backdrop. Charlie Woods commits to Florida State. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-09-Sports-Entertainment.mp3" length="6291456" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-09-sports</guid>
+      <pubDate>Tue, 11 Feb 2026 20:00:00 -0800</pubDate>
+      <itunes:episode>29</itunes:episode>
+      <itunes:duration>312</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 11: Autonomous Vehicles &amp; Space Tech</title>
+      <description><![CDATA[Tesla robotaxi swerves to avoid Waymo vehicle in Austin - first documented AV near-miss. Musk unveils plan for AI satellite factory on the moon. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-08-Autonomous-Space.mp3" length="6397952" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-08-autonomous</guid>
+      <pubDate>Tue, 11 Feb 2026 19:00:00 -0800</pubDate>
+      <itunes:episode>28</itunes:episode>
+      <itunes:duration>306</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 11: Business &amp; Markets</title>
+      <description><![CDATA[Software stocks extend losses as AI disruption fears grip sector - Dassault drops 18%. Google offers buyouts to staff not "all in" on AI. Nearly 70% of shoppers abandon AI assistants after bad results. Owlet partners with PromptCare. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-07-Business-Markets.mp3" length="6606028" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-07-business</guid>
+      <pubDate>Tue, 11 Feb 2026 18:00:00 -0800</pubDate>
+      <itunes:episode>27</itunes:episode>
+      <itunes:duration>318</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 11: Tech Products &amp; Developer Tools</title>
+      <description><![CDATA[OpenAI upgrades ChatGPT deep research with GPT-5.2. DeepSeek expands context window 10x to 1M+ tokens. Moderne launches Prethink for AI coding agents. Google opens free AI agent training. Udemy courses inside ChatGPT. Microsoft patches Notepad amid AI coding security gaps. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-06-Tech-Products-Tools.mp3" length="7233536" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-06-tech</guid>
+      <pubDate>Tue, 11 Feb 2026 17:00:00 -0800</pubDate>
+      <itunes:episode>26</itunes:episode>
+      <itunes:duration>348</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 11: AI Safety &amp; Industry Shakeups</title>
+      <description><![CDATA[Anthropic exec criticizes OpenAI for chasing "flashy headlines." Claude Opus 4.6 aided weapons research in safety tests. OpenAI fires executive who raised concerns about "adult mode." AI watchdog claims OpenAI violated California law. Half of xAI founding team departs. Microsoft tracks AI "recommendation poisoning." Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-05-AI-Safety-Shakeups.mp3" length="7340032" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-05-ai-safety</guid>
+      <pubDate>Tue, 11 Feb 2026 16:00:00 -0800</pubDate>
+      <itunes:episode>25</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 11: Diplomacy &amp; Domestic Politics</title>
+      <description><![CDATA[Greece and Turkey sign seven agreements at Ankara summit. Texas Gov. Abbott breaks with Trump on nationalizing elections. Trump privately considers quitting USMCA trade deal. Delivery driver released in Nancy Guthrie case. Bodycam footage shows Border Patrol chief praised agent after Chicago shooting. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-04-Diplomacy-Domestic.mp3" length="7654400" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-04-diplomacy</guid>
+      <pubDate>Tue, 11 Feb 2026 15:00:00 -0800</pubDate>
+      <itunes:episode>24</itunes:episode>
+      <itunes:duration>354</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 11: Geopolitics &amp; Security</title>
+      <description><![CDATA[Ukraine faces nationwide blackouts after Russian strikes. Russia threatens military countermeasures over Greenland buildup. China warns Taiwan of "extermination" over HIMARS deployment. Satellite images show US Patriot missiles on mobile trucks in Qatar. Haley urges Trump on Iran. Iran's president apologizes for protest crackdown. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-03-Geopolitics-Security.mp3" length="8286208" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-03-geopolitics</guid>
+      <pubDate>Tue, 11 Feb 2026 14:00:00 -0800</pubDate>
+      <itunes:episode>23</itunes:episode>
+      <itunes:duration>384</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 11: Epstein Files Erupt</title>
+      <description><![CDATA[White House faces questions after FBI file shows Trump made 2006 Epstein call. Bondi and lawmakers clash in fiery hearing. Rep. Ro Khanna reads six names from Epstein files on House floor. DOJ files reveal Epstein hired Philippine team to bury crimes online. Day One Ventures founder responds to revelations. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-02-Epstein-Files-Erupt.mp3" length="7864320" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-02-epstein</guid>
+      <pubDate>Tue, 11 Feb 2026 13:00:00 -0800</pubDate>
+      <itunes:episode>22</itunes:episode>
+      <itunes:duration>372</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 11: Opening - Tuesday News Briefing</title>
+      <description><![CDATA[Opening segment for February 11, 2026. Epstein hearings explode on Capitol Hill, AI safety bombshells from Anthropic and OpenAI, Ukraine faces nationwide blackouts, Greece-Turkey diplomatic thaw, and 40 headlines across 10 segments. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb11-01-Opening.mp3" length="3880755" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb11-01-opening</guid>
+      <pubDate>Tue, 11 Feb 2026 12:00:00 -0800</pubDate>
+      <itunes:episode>21</itunes:episode>
+      <itunes:duration>192</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+
+    <!-- Feb 10, 2026 - Monday News Briefing (Episodes 11-20) -->
+    <item>
+      <title>Feb 10: Entertainment &amp; Gaming</title>
+      <description><![CDATA[Entertainment and gaming news wrap for February 10, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-10-Entertainment-Gaming.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-10-entertainment</guid>
+      <pubDate>Mon, 10 Feb 2026 21:00:00 -0800</pubDate>
+      <itunes:episode>20</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 10: Science, Health &amp; Space</title>
+      <description><![CDATA[Science, health, and space developments for February 10, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-09-Science-Health-Space.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-09-science</guid>
+      <pubDate>Mon, 10 Feb 2026 20:00:00 -0800</pubDate>
+      <itunes:episode>19</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 10: Markets &amp; Economy</title>
+      <description><![CDATA[Markets and economic analysis for February 10, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-08-Markets-Economy.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-08-markets</guid>
+      <pubDate>Mon, 10 Feb 2026 19:00:00 -0800</pubDate>
+      <itunes:episode>18</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 10: Epstein Files &amp; US Politics</title>
+      <description><![CDATA[Epstein file revelations and US domestic politics for February 10, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-07-Epstein-US-Politics.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-07-epstein</guid>
+      <pubDate>Mon, 10 Feb 2026 18:00:00 -0800</pubDate>
+      <itunes:episode>17</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 10: Tech Industry</title>
+      <description><![CDATA[Technology industry developments for February 10, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-06-Tech-Industry.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-06-tech</guid>
+      <pubDate>Mon, 10 Feb 2026 17:00:00 -0800</pubDate>
+      <itunes:episode>16</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 10: AI Safety &amp; Trust Crisis</title>
+      <description><![CDATA[AI safety vulnerabilities and trust crisis analysis for February 10, 2026. Microsoft finds single prompt strips safety guardrails from 15 major AI models. Deepfake detection ability cut in half. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-05-AI-Safety-Trust.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-05-ai-safety</guid>
+      <pubDate>Mon, 10 Feb 2026 16:00:00 -0800</pubDate>
+      <itunes:episode>15</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 10: Transatlantic Tensions</title>
+      <description><![CDATA[US-Europe relations hit new lows at the Winter Olympics. Macron accuses Trump of seeking "dismemberment" of the EU. Immigration standoff as DHS shutdown approaches. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-04-Transatlantic-Tensions.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-04-transatlantic</guid>
+      <pubDate>Mon, 10 Feb 2026 15:00:00 -0800</pubDate>
+      <itunes:episode>14</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 10: Global Flashpoints</title>
+      <description><![CDATA[Iran, China, and Turkey security flashpoints. Iran buries nuclear site entrances. Turkey warns of nuclear weapons pursuit. China vows to back "reunification forces" in Taiwan. PROTECT Taiwan Act passes 395-2. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-03-Global-Flashpoints.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-03-flashpoints</guid>
+      <pubDate>Mon, 10 Feb 2026 14:00:00 -0800</pubDate>
+      <itunes:episode>13</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 10: Ukraine-Russia Peace Talks</title>
+      <description><![CDATA[Comprehensive coverage of Ukraine-Russia peace process. Russia demands permanent NATO bar for Ukraine. Estonian intelligence assesses Russia is stalling. European defense startups raise record $8.7B. EU drafts five-step plan for Ukraine partial membership. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-02-Ukraine-Russia-Peace.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-02-ukraine</guid>
+      <pubDate>Mon, 10 Feb 2026 13:00:00 -0800</pubDate>
+      <itunes:episode>12</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 10: Opening - Monday News Briefing</title>
+      <description><![CDATA[Opening segment for February 10, 2026. Post-Super Bowl Monday with Ukraine peace talks stalling, AI safety alarming, transatlantic tensions rising, and 60 stories across 10 segments. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb10-01-Opening.mp3" length="4000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb10-01-opening</guid>
+      <pubDate>Mon, 10 Feb 2026 12:00:00 -0800</pubDate>
+      <itunes:episode>11</itunes:episode>
+      <itunes:duration>192</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+
+    <!-- Feb 9, 2026 - Super Bowl LX Edition (Episodes 1-10) -->
+    <item>
+      <title>Feb 9: Closing - Super Bowl LX Edition</title>
+      <description><![CDATA[Closing segment for the Super Bowl LX special edition, February 9, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-10-Closing.mp3" length="4000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-10-closing</guid>
+      <pubDate>Sun, 09 Feb 2026 21:00:00 -0800</pubDate>
+      <itunes:episode>10</itunes:episode>
+      <itunes:duration>192</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 9: Entertainment, Sports &amp; Science</title>
+      <description><![CDATA[Entertainment, sports, and science developments for February 9, 2026 Super Bowl edition. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-09-Entertainment-Sports-Science.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-09-entertainment</guid>
+      <pubDate>Sun, 09 Feb 2026 20:00:00 -0800</pubDate>
+      <itunes:episode>9</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 9: US Politics</title>
+      <description><![CDATA[US political developments on Super Bowl Sunday, February 9, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-08-US-Politics.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-08-politics</guid>
+      <pubDate>Sun, 09 Feb 2026 19:00:00 -0800</pubDate>
+      <itunes:episode>8</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 9: Geopolitics</title>
+      <description><![CDATA[Global geopolitics analysis for February 9, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-07-Geopolitics.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-07-geopolitics</guid>
+      <pubDate>Sun, 09 Feb 2026 18:00:00 -0800</pubDate>
+      <itunes:episode>7</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 9: Markets &amp; Business</title>
+      <description><![CDATA[Markets and business analysis for February 9, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-06-Markets-Business.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-06-markets</guid>
+      <pubDate>Sun, 09 Feb 2026 17:00:00 -0800</pubDate>
+      <itunes:episode>6</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 9: Apple &amp; Consumer Tech</title>
+      <description><![CDATA[Apple and consumer technology developments for February 9, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-05-Apple-Consumer-Tech.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-05-apple</guid>
+      <pubDate>Sun, 09 Feb 2026 16:00:00 -0800</pubDate>
+      <itunes:episode>5</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 9: AI &amp; Technology</title>
+      <description><![CDATA[Artificial intelligence and technology analysis for February 9, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-04-AI-Technology.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-04-ai</guid>
+      <pubDate>Sun, 09 Feb 2026 15:00:00 -0800</pubDate>
+      <itunes:episode>4</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 9: Entertainment Spectacle</title>
+      <description><![CDATA[Super Bowl LX entertainment and halftime show analysis for February 9, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-03-Entertainment-Spectacle.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-03-entertainment</guid>
+      <pubDate>Sun, 09 Feb 2026 14:00:00 -0800</pubDate>
+      <itunes:episode>3</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 9: Super Bowl Ad Blitz</title>
+      <description><![CDATA[Comprehensive analysis of the Super Bowl LX advertising landscape for February 9, 2026. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-02-Super-Bowl-Ad-Blitz.mp3" length="7000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-02-ads</guid>
+      <pubDate>Sun, 09 Feb 2026 13:00:00 -0800</pubDate>
+      <itunes:episode>2</itunes:episode>
+      <itunes:duration>360</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 9: Opening - Super Bowl LX Edition</title>
+      <description><![CDATA[Opening segment for the Super Bowl LX special edition, February 9, 2026. Comprehensive dual-host coverage of the biggest sporting and cultural event of the year alongside breaking news. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb09-SB-01-Opening.mp3" length="4000000" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb09-01-opening</guid>
+      <pubDate>Sun, 09 Feb 2026 12:00:00 -0800</pubDate>
+      <itunes:episode>1</itunes:episode>
+      <itunes:duration>192</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+
+  </channel>
+</rss>
