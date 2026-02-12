@@ -2577,6 +2577,7 @@ def download_transcript(job_id):
 
 
 @app.route('/cleanup/<job_id>', methods=['POST'])
+@login_required
 def cleanup(job_id):
     """Clean up temporary files after download"""
     job_id = re.sub(r'[^a-zA-Z0-9_-]', '', job_id)
