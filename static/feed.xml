@@ -29,6 +29,108 @@
     <itunes:type>episodic</itunes:type>
     <podcast:locked>no</podcast:locked>
 
+    <!-- Feb 12, 2026 - Thursday News Briefing (Episodes 31-40) -->
+    <item>
+      <title>Feb 12: Opening</title>
+      <description><![CDATA[Welcome to our comprehensive news analysis for Wednesday, February 12, 2026. I'm Marcus Rodriguez, bringing you business and political insight on what's shaping markets and policy today. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-01-Opening.mp3" length="4793280" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-01-opening</guid>
+      <pubDate>Thu, 12 Feb 2026 02:00:00 -0800</pubDate>
+      <itunes:episode>31</itunes:episode>
+      <itunes:duration>299</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 12: Ukraine War Escalation and Strategic Shifts</title>
+      <description><![CDATA[Sarah, let's start with what appears to be a significant escalation in the Ukraine conflict. Russian strikes have cut heating to hundreds of thousands of people in Kyiv and Odesa, with at least two confirmed deaths. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-02-Ukraine-War-Escalation-and-Strategic-Shifts.mp3" length="5900640" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-02-ukraine-war-escalation-and-strategic-shifts</guid>
+      <pubDate>Thu, 12 Feb 2026 03:00:00 -0800</pubDate>
+      <itunes:episode>32</itunes:episode>
+      <itunes:duration>368</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 12: Asia-Pacific Tensions and Nuclear Developments</title>
+      <description><![CDATA[Moving to the Asia-Pacific, Marcus, we're seeing equally concerning military escalations. China has warned Taiwan of "extermination" over planned HIMARS missile deployments, using language that represents a significant escalation in Beijing's rhetoric toward the island. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-03-Asia-Pacific-Tensions-and-Nuclear-Developments.mp3" length="6642720" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-03-asia-pacific-tensions-and-nuclear-developments</guid>
+      <pubDate>Thu, 12 Feb 2026 04:00:00 -0800</pubDate>
+      <itunes:episode>33</itunes:episode>
+      <itunes:duration>415</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 12: Trump Administration Domestic Policies and Controversies</title>
+      <description><![CDATA[Let's turn to domestic policy developments, Sarah, where the Trump administration is facing several significant controversies. UN experts are warning that Minneapolis ICE shootings may constitute extrajudicial killings as part of Operation Metro Surge, the administration's immigration crackdown i... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-04-Trump-Administration-Domestic-Policies-and-Controversies.mp3" length="6981120" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-04-trump-administration-domestic-policies-and-controversies</guid>
+      <pubDate>Thu, 12 Feb 2026 05:00:00 -0800</pubDate>
+      <itunes:episode>34</itunes:episode>
+      <itunes:duration>436</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 12: AI Disruption and Corporate Power Struggles</title>
+      <description><![CDATA[Marcus, let's dive into what's becoming an AI arms race with significant political and economic implications. Anthropic has just invested twenty million dollars in a super PAC specifically designed to counter OpenAI's political influence. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-05-AI-Disruption-and-Corporate-Power-Struggles.mp3" length="7655520" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-05-ai-disruption-and-corporate-power-struggles</guid>
+      <pubDate>Thu, 12 Feb 2026 06:00:00 -0800</pubDate>
+      <itunes:episode>35</itunes:episode>
+      <itunes:duration>478</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 12: Technology Products and Platform Evolution</title>
+      <description><![CDATA[Marcus, let's examine some major technology platform developments that are reshaping how we interact with digital services. Elon Musk announced that X Money, the payment system designed to transform X into an "everything app," will launch beta testing in two months. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-06-Technology-Products-and-Platform-Evolution.mp3" length="7796640" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-06-technology-products-and-platform-evolution</guid>
+      <pubDate>Thu, 12 Feb 2026 07:00:00 -0800</pubDate>
+      <itunes:episode>36</itunes:episode>
+      <itunes:duration>487</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 12: Business and Financial Market Developments</title>
+      <description><![CDATA[Sarah, let's examine some significant business developments that are shaping market sentiment and corporate strategy. Treasury Secretary Scott Bessent has signaled potential lifting of Russian oil sanctions if the war ends, telling Fox News that removing sanctions on Russian, Venezuelan, and Iran... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-07-Business-and-Financial-Market-Developments.mp3" length="8122560" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-07-business-and-financial-market-developments</guid>
+      <pubDate>Thu, 12 Feb 2026 08:00:00 -0800</pubDate>
+      <itunes:episode>37</itunes:episode>
+      <itunes:duration>507</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 12: Science, Space, and Medical Innovations</title>
+      <description><![CDATA[Marcus, let's explore some fascinating developments in science and space that are pushing technological boundaries. NASA's Crew-12 mission launching Thursday will make history as the first mission to allow smartphones in space, representing a significant shift in space technology policies. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-08-Science-Space-and-Medical-Innovations.mp3" length="8556480" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-08-science-space-and-medical-innovations</guid>
+      <pubDate>Thu, 12 Feb 2026 09:00:00 -0800</pubDate>
+      <itunes:episode>38</itunes:episode>
+      <itunes:duration>534</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 12: Sports, Entertainment, and Cultural Developments</title>
+      <description><![CDATA[Sarah, let's turn to some lighter but still significant developments in entertainment and sports. Bad Bunny has completely wiped his Instagram account after his record-breaking Super Bowl halftime performance drew an estimated one hundred thirty-five million viewers and criticism from President T... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-09-Sports-Entertainment-and-Cultural-Developments.mp3" length="8482560" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-09-sports-entertainment-and-cultural-developments</guid>
+      <pubDate>Thu, 12 Feb 2026 10:00:00 -0800</pubDate>
+      <itunes:episode>39</itunes:episode>
+      <itunes:duration>530</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 12: Closing</title>
+      <description><![CDATA[That's our comprehensive analysis for Wednesday, February 12, 2026. We've covered an extraordinary range of developments that demonstrate how interconnected our global systems have become - from Ukrainian energy infrastructure attacks affecting hundreds of thousands of civilians to AI companies f... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb12-10-Closing.mp3" length="6281760" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb12-10-closing</guid>
+      <pubDate>Thu, 12 Feb 2026 11:00:00 -0800</pubDate>
+      <itunes:episode>40</itunes:episode>
+      <itunes:duration>392</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+
     <!-- Feb 11, 2026 - Tuesday News Briefing (Episodes 21-30) -->
     <item>
       <title>Feb 11: Closing</title>
