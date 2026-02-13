@@ -29,6 +29,108 @@
     <itunes:type>episodic</itunes:type>
     <podcast:locked>no</podcast:locked>
 
+    <!-- Feb 13, 2026 - Friday News Briefing (Episodes 41-50) -->
+    <item>
+      <title>Feb 13: Opening</title>
+      <description><![CDATA[Welcome to our comprehensive news analysis for Thursday, February 13, 2026. I'm Marcus Rodriguez, your business and political analyst, and we're covering a day packed with significant developments across global markets, technology, and international affairs. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-01-Opening.mp3" length="5105280" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-01-opening</guid>
+      <pubDate>Fri, 13 Feb 2026 02:00:00 -0800</pubDate>
+      <itunes:episode>41</itunes:episode>
+      <itunes:duration>319</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 13: Ukrainian Cyber Warfare Revolution</title>
+      <description><![CDATA[Let's start with this remarkable story from Ukraine that really exemplifies how cyber warfare is evolving beyond anything we've seen in previous conflicts. Ukrainian cyber forces have managed to collect location data on more than 2,400 Russian military terminals by creating a fake Starlink regist... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-02-Ukrainian-Cyber-Warfare-Revolution.mp3" length="4361280" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-02-ukrainian-cyber-warfare-revolution</guid>
+      <pubDate>Fri, 13 Feb 2026 03:00:00 -0800</pubDate>
+      <itunes:episode>42</itunes:episode>
+      <itunes:duration>272</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 13: AI Security and Global Competition Crisis</title>
+      <description><![CDATA[Moving to artificial intelligence developments that are reshaping both the technology landscape and national security calculations, we have several interconnected stories that paint a picture of an AI ecosystem under significant stress. Let's start with OpenAI's warning to Congress that Chinese s... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-03-AI-Security-and-Global-Competition-Crisis.mp3" length="6074400" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-03-ai-security-and-global-competition-crisis</guid>
+      <pubDate>Fri, 13 Feb 2026 04:00:00 -0800</pubDate>
+      <itunes:episode>43</itunes:episode>
+      <itunes:duration>379</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 13: Constitutional Crisis and Executive Overreach</title>
+      <description><![CDATA[We're witnessing what constitutional scholars might view as an unprecedented expansion of executive influence over the judicial branch. The Trump administration has filed five unsolicited briefs with the Supreme Court in just three weeks, backing conservative causes and far exceeding any previous... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-04-Constitutional-Crisis-and-Executive-Overreach.mp3" length="6061920" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-04-constitutional-crisis-and-executive-overreach</guid>
+      <pubDate>Fri, 13 Feb 2026 05:00:00 -0800</pubDate>
+      <itunes:episode>44</itunes:episode>
+      <itunes:duration>378</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 13: Military Technology and Strategic Defense</title>
+      <description><![CDATA[Let's examine some remarkable developments in military technology that are reshaping defense capabilities and strategic thinking. Starting with Allen Control Systems, which just won a U.S. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-05-Military-Technology-and-Strategic-Defense.mp3" length="6191520" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-05-military-technology-and-strategic-defense</guid>
+      <pubDate>Fri, 13 Feb 2026 06:00:00 -0800</pubDate>
+      <itunes:episode>45</itunes:episode>
+      <itunes:duration>386</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 13: Technology Industry Transformation</title>
+      <description><![CDATA[The technology sector is experiencing one of its most dramatic transformations in decades, with layoffs, strategic pivots, and fundamental shifts in how companies approach AI development. We've seen over 30,000 tech layoffs globally just in the first six weeks of 2026, which represents a stunning... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-06-Technology-Industry-Transformation.mp3" length="6975840" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-06-technology-industry-transformation</guid>
+      <pubDate>Fri, 13 Feb 2026 07:00:00 -0800</pubDate>
+      <itunes:episode>46</itunes:episode>
+      <itunes:duration>435</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 13: Financial Markets and Corporate Strategy</title>
+      <description><![CDATA[The financial markets are experiencing some dramatic shifts that reflect broader concerns about technology valuations and global economic stability. Apple has lost $200 billion in market value following delays to Siri AI features and FTC warnings about their news curation practices. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-07-Financial-Markets-and-Corporate-Strategy.mp3" length="7569120" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-07-financial-markets-and-corporate-strategy</guid>
+      <pubDate>Fri, 13 Feb 2026 08:00:00 -0800</pubDate>
+      <itunes:episode>47</itunes:episode>
+      <itunes:duration>473</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 13: Scientific Breakthroughs and Innovation</title>
+      <description><![CDATA[We're witnessing some extraordinary scientific achievements that could fundamentally reshape energy production and space exploration. Helion Energy has achieved 150 million degrees in their Polaris prototype reactor, marking what they're calling a private fusion first. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-08-Scientific-Breakthroughs-and-Innovation.mp3" length="6473760" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-08-scientific-breakthroughs-and-innovation</guid>
+      <pubDate>Fri, 13 Feb 2026 09:00:00 -0800</pubDate>
+      <itunes:episode>48</itunes:episode>
+      <itunes:duration>404</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 13: Sports, Entertainment, and Cultural Developments</title>
+      <description><![CDATA[Let's shift to some fascinating developments in sports and entertainment that reflect broader changes in how technology is reshaping competitive activities and content creation. Starting with the NBA, which has fined the Utah Jazz $500,000 and the Indiana Pacers $100,000 for tanking. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-09-Sports-Entertainment-and-Cultural-Developments.mp3" length="7871040" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-09-sports-entertainment-and-cultural-developments</guid>
+      <pubDate>Fri, 13 Feb 2026 10:00:00 -0800</pubDate>
+      <itunes:episode>49</itunes:episode>
+      <itunes:duration>491</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 13: Closing</title>
+      <description><![CDATA[As we wrap up today's comprehensive analysis, what strikes me most about Thursday, February 13th, 2026, is how these stories illustrate the acceleration of change across virtually every sector of society. From Ukrainian cyber operations that turn enemy communications against themselves, to fusion... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb13-10-Closing.mp3" length="7202880" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb13-10-closing</guid>
+      <pubDate>Fri, 13 Feb 2026 11:00:00 -0800</pubDate>
+      <itunes:episode>50</itunes:episode>
+      <itunes:duration>450</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+
     <!-- Feb 12, 2026 - Thursday News Briefing (Episodes 31-40) -->
     <item>
       <title>Feb 12: Opening</title>
