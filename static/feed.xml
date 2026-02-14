@@ -29,6 +29,108 @@
     <itunes:type>episodic</itunes:type>
     <podcast:locked>no</podcast:locked>
 
+    <!-- Feb 14, 2026 - Saturday News Briefing (Episodes 51-60) -->
+    <item>
+      <title>Feb 14: Opening</title>
+      <description><![CDATA[Welcome to our comprehensive news analysis for Friday, February 14, 2026. I'm Marcus Rodriguez, your business and political analyst, and this Valentine's Day brings us a fascinating mix of technological disruption, geopolitical tensions, and market volatility that's reshaping our world in real time. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-01-Opening.mp3" length="4609920" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-01-opening</guid>
+      <pubDate>Sat, 14 Feb 2026 02:00:00 -0800</pubDate>
+      <itunes:episode>51</itunes:episode>
+      <itunes:duration>288</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 14: Geopolitical Tensions and Military Developments</title>
+      <description><![CDATA[Let's start with the major geopolitical developments that are reshaping global security dynamics. The UK's announcement of deploying the HMS Prince of Wales-led carrier strike group to the Arctic represents a significant escalation in response to tensions surrounding Greenland and broader Arctic ... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-02-Geopolitical-Tensions-and-Military-Developments.mp3" length="5570880" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-02-geopolitical-tensions-and-military-developments</guid>
+      <pubDate>Sat, 14 Feb 2026 03:00:00 -0800</pubDate>
+      <itunes:episode>52</itunes:episode>
+      <itunes:duration>348</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 14: AI Revolution and Job Disruption</title>
+      <description><![CDATA[The artificial intelligence revolution is accelerating at a pace that's catching even experts off guard. Anthropic CEO Dario Amodei's warning about the end of the "centaur phase" in software development represents one of the most significant predictions about AI's impact on the job market we've h... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-03-AI-Revolution-and-Job-Disruption.mp3" length="6167520" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-03-ai-revolution-and-job-disruption</guid>
+      <pubDate>Sat, 14 Feb 2026 04:00:00 -0800</pubDate>
+      <itunes:episode>53</itunes:episode>
+      <itunes:duration>385</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 14: Political Upheaval and Government Operations</title>
+      <description><![CDATA[The political landscape in Washington has reached a critical juncture with the Department of Homeland Security shutting down as Democrats hold firm on demands for ICE reforms. With nearly 258,000 DHS employees now working without pay and Congress leaving for a 10-day recess, we're witnessing a hi... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-04-Political-Upheaval-and-Government-Operations.mp3" length="6579840" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-04-political-upheaval-and-government-operations</guid>
+      <pubDate>Sat, 14 Feb 2026 05:00:00 -0800</pubDate>
+      <itunes:episode>54</itunes:episode>
+      <itunes:duration>411</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 14: Technology Infrastructure and Corporate Strategy</title>
+      <description><![CDATA[The technology sector is experiencing fundamental shifts that go beyond just AI development, touching every aspect of how companies operate and compete in the modern economy. ByteDance's viral AI video tool is drawing fury from Hollywood, representing a perfect case study of how Chinese technolog... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-05-Technology-Infrastructure-and-Corporate-Strategy.mp3" length="6930720" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-05-technology-infrastructure-and-corporate-strategy</guid>
+      <pubDate>Sat, 14 Feb 2026 06:00:00 -0800</pubDate>
+      <itunes:episode>55</itunes:episode>
+      <itunes:duration>433</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 14: Financial Markets and Economic Disruption</title>
+      <description><![CDATA[The financial markets are sending increasingly urgent signals about fundamental shifts in the global economy. Ray Dalio's warning that the US wealth-to-money ratio has reached a 120-year high represents one of the most significant macroeconomic alerts we've received from a major investor this cycle. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-06-Financial-Markets-and-Economic-Disruption.mp3" length="6743520" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-06-financial-markets-and-economic-disruption</guid>
+      <pubDate>Sat, 14 Feb 2026 07:00:00 -0800</pubDate>
+      <itunes:episode>56</itunes:episode>
+      <itunes:duration>421</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 14: National Security and Military Technology</title>
+      <description><![CDATA[The intersection of advanced military technology and national security strategy is evolving at an unprecedented pace, with developments that could fundamentally alter global power balances. The Pentagon's preparation for potential weeks-long operations against Iran represents a significant escala... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-07-National-Security-and-Military-Technology.mp3" length="7497120" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-07-national-security-and-military-technology</guid>
+      <pubDate>Sat, 14 Feb 2026 08:00:00 -0800</pubDate>
+      <itunes:episode>57</itunes:episode>
+      <itunes:duration>468</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 14: Science, Innovation and Research Breakthroughs</title>
+      <description><![CDATA[The pace of scientific innovation is accelerating across multiple disciplines, with developments that could fundamentally reshape our understanding of physics, agriculture, and human-computer interaction. OpenAI's claim that GPT-5.2 has derived new results in theoretical physics represents a pote... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-08-Science-Innovation-and-Research-Breakthroughs.mp3" length="8129280" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-08-science-innovation-and-research-breakthroughs</guid>
+      <pubDate>Sat, 14 Feb 2026 09:00:00 -0800</pubDate>
+      <itunes:episode>58</itunes:episode>
+      <itunes:duration>508</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 14: Entertainment, Sports and Cultural Shifts</title>
+      <description><![CDATA[The entertainment industry is grappling with technological disruption and changing consumer preferences that are reshaping how content is created, distributed, and consumed. Netflix's cancellation of the anime series "Terminator Zero" despite strong critical reviews illustrates the complex calcul... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-09-Entertainment-Sports-and-Cultural-Shifts.mp3" length="7746240" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-09-entertainment-sports-and-cultural-shifts</guid>
+      <pubDate>Sat, 14 Feb 2026 10:00:00 -0800</pubDate>
+      <itunes:episode>59</itunes:episode>
+      <itunes:duration>484</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 14: Closing</title>
+      <description><![CDATA[That's our comprehensive analysis for Friday, February 14, 2026. From the Arctic deployment of UK naval forces to the streets of Washington where DHS employees work without pay, we're witnessing a period of unprecedented change across multiple domains simultaneously. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb14-10-Closing.mp3" length="5145120" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb14-10-closing</guid>
+      <pubDate>Sat, 14 Feb 2026 11:00:00 -0800</pubDate>
+      <itunes:episode>60</itunes:episode>
+      <itunes:duration>321</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+
     <!-- Feb 13, 2026 - Friday News Briefing (Episodes 41-50) -->
     <item>
       <title>Feb 13: Opening</title>
