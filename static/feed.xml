@@ -12,7 +12,7 @@
     <copyright>&#xA9; 2026 Intellegix. All rights reserved.</copyright>
     <description>AI-generated news briefings covering global geopolitics, domestic policy, technology, and breaking events. Dual-host analysis with Marcus Rodriguez and Sarah Chen. Powered by artificial intelligence, curated for human understanding.</description>
     <image>
-      <url>https://podcast-tts-web.onrender.com/static/episodes/cover-v2.jpg</url>
+      <url>https://podcast-tts-web.onrender.com/static/episodes/cover-v3-dark.jpg</url>
       <title>Intellegix</title>
       <link>https://podcast-tts-web.onrender.com</link>
     </image>
@@ -25,7 +25,7 @@
     <itunes:category text="News">
       <itunes:category text="Daily News"/>
     </itunes:category>
-    <itunes:image href="https://podcast-tts-web.onrender.com/static/episodes/cover-v2.jpg"/>
+    <itunes:image href="https://podcast-tts-web.onrender.com/static/episodes/cover-v3-dark.jpg"/>
     <itunes:type>episodic</itunes:type>
     <podcast:locked>no</podcast:locked>
 
