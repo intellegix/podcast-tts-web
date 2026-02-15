@@ -29,6 +29,108 @@
     <itunes:type>episodic</itunes:type>
     <podcast:locked>no</podcast:locked>
 
+    <!-- Feb 15, 2026 - Sunday News Briefing (Episodes 61-70) -->
+    <item>
+      <title>Feb 15: Opening</title>
+      <description><![CDATA[Welcome to our comprehensive news analysis for Sunday, February 15, 2026. I'm Marcus Rodriguez, your business and political analyst, and what a weekend of developments we have to unpack today. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-01-Opening.mp3" length="5013120" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-01-opening</guid>
+      <pubDate>Sun, 15 Feb 2026 02:00:00 -0800</pubDate>
+      <itunes:episode>61</itunes:episode>
+      <itunes:duration>313</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 15: Immigration Enforcement Revolution</title>
+      <description><![CDATA[Sarah, let's dive right into what can only be described as the most dramatic expansion of immigration enforcement in modern American history. The Trump administration has just unveiled a thirty-eight billion dollar plan to completely overhaul ICE detention, and the numbers are staggering. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-02-Immigration-Enforcement-Revolution.mp3" length="5934720" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-02-immigration-enforcement-revolution</guid>
+      <pubDate>Sun, 15 Feb 2026 03:00:00 -0800</pubDate>
+      <itunes:episode>62</itunes:episode>
+      <itunes:duration>370</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 15: Global Security and Intelligence Operations</title>
+      <description><![CDATA[Marcus, let's shift to some of the most significant intelligence and security developments we've seen in months. The revelation about Alexei Navalny's death is particularly chilling. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-03-Global-Security-and-Intelligence-Operations.mp3" length="6767520" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-03-global-security-and-intelligence-operations</guid>
+      <pubDate>Sun, 15 Feb 2026 04:00:00 -0800</pubDate>
+      <itunes:episode>63</itunes:episode>
+      <itunes:duration>422</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 15: Munich Security Conference and Transatlantic Relations</title>
+      <description><![CDATA[Sarah, let's turn to what might be one of the most consequential diplomatic gatherings in recent memory - the Munich Security Conference. The fault lines that emerged this weekend could reshape transatlantic relations for the next decade. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-04-Munich-Security-Conference-and-Transatlantic-Relations.mp3" length="6514080" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-04-munich-security-conference-and-transatlantic-relations</guid>
+      <pubDate>Sun, 15 Feb 2026 05:00:00 -0800</pubDate>
+      <itunes:episode>64</itunes:episode>
+      <itunes:duration>407</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 15: Artificial Intelligence and Technology Innovation</title>
+      <description><![CDATA[Marcus, let's dive into what might be the biggest technology story of the weekend - Anthropic's absolutely historic funding round. Thirty billion dollars, valuing the AI company at three hundred eighty billion dollars. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-05-Artificial-Intelligence-and-Technology-Innovation.mp3" length="7386240" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-05-artificial-intelligence-and-technology-innovation</guid>
+      <pubDate>Sun, 15 Feb 2026 06:00:00 -0800</pubDate>
+      <itunes:episode>65</itunes:episode>
+      <itunes:duration>461</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 15: Energy Markets and Economic Transformation</title>
+      <description><![CDATA[Sarah, let's turn to what might be one of the most significant energy policy shifts in recent memory. The U.S. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-06-Energy-Markets-and-Economic-Transformation.mp3" length="6565920" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-06-energy-markets-and-economic-transformation</guid>
+      <pubDate>Sun, 15 Feb 2026 07:00:00 -0800</pubDate>
+      <itunes:episode>66</itunes:episode>
+      <itunes:duration>410</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 15: Corporate Leadership and Financial Markets</title>
+      <description><![CDATA[Sarah, let's examine some truly extraordinary corporate leadership changes that are sending shockwaves through multiple industries. The Epstein file fallout continues to claim high-profile casualties, with DP World replacing both their CEO and chairman, Casey Wasserman putting his talent agency u... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-07-Corporate-Leadership-and-Financial-Markets.mp3" length="6928320" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-07-corporate-leadership-and-financial-markets</guid>
+      <pubDate>Sun, 15 Feb 2026 08:00:00 -0800</pubDate>
+      <itunes:episode>67</itunes:episode>
+      <itunes:duration>433</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 15: Science, Space, and Environmental Innovation</title>
+      <description><![CDATA[Marcus, let's explore some remarkable developments in science and space exploration that are reshaping our understanding of both Earth and beyond. China's completion of their first at-sea rocket booster recovery represents a major milestone in the global space race, directly challenging SpaceX's ... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-08-Science-Space-and-Environmental-Innovation.mp3" length="6958080" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-08-science-space-and-environmental-innovation</guid>
+      <pubDate>Sun, 15 Feb 2026 09:00:00 -0800</pubDate>
+      <itunes:episode>68</itunes:episode>
+      <itunes:duration>434</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 15: Sports, Entertainment, and Cultural Developments</title>
+      <description><![CDATA[Sarah, let's turn to some fascinating developments in sports and entertainment that reveal broader cultural and political currents. President Trump's pardoning of five former NFL players, including Hall of Famer Joe Klecko and Super Bowl champion Nate Newton, represents an interesting intersectio... Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-09-Sports-Entertainment-and-Cultural-Developments.mp3" length="6695520" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-09-sports-entertainment-and-cultural-developments</guid>
+      <pubDate>Sun, 15 Feb 2026 10:00:00 -0800</pubDate>
+      <itunes:episode>69</itunes:episode>
+      <itunes:duration>418</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Feb 15: Closing</title>
+      <description><![CDATA[That's our comprehensive analysis for Sunday, February 15, 2026. What an extraordinary weekend of developments across every major sector of American and international affairs. Hosted by Marcus Rodriguez and Sarah Chen.]]></description>
+      <enclosure url="https://podcast-tts-web.onrender.com/static/episodes/Feb15-10-Closing.mp3" length="4833120" type="audio/mpeg"/>
+      <guid isPermaLink="false">intellegix-feb15-10-closing</guid>
+      <pubDate>Sun, 15 Feb 2026 11:00:00 -0800</pubDate>
+      <itunes:episode>70</itunes:episode>
+      <itunes:duration>302</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+
     <!-- Feb 14, 2026 - Saturday News Briefing (Episodes 51-60) -->
     <item>
       <title>Feb 14: Opening</title>
